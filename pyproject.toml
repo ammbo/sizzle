@@ -1,0 +1,26 @@
+[project]
+name = "sizzle"
+version = "0.1.0"
+description = "An agent that reads your repo, operates your app, and ships the three-minute demo video your hackathon requires - then grades its own cut and recuts until it passes."
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "dashscope>=1.25.17",
+    "playwright>=1.45",
+    "pillow>=10.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "mcp>=1.0",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+sizzle = "sizzle.cli:app"
+sizzle-mcp = "sizzle.mcp_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sizzle"]

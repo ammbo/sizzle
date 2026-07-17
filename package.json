@@ -1,0 +1,17 @@
+{
+  "name": "sizzle-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && wrangler deploy --dry-run",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "types": "wrangler types worker-configuration.d.ts"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "typescript": "latest",
+    "wrangler": "latest"
+  }
+}

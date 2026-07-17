@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sizzle-video-ai",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-07-16",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "single-page-application"
+  },
+  "routes": [
+    {
+      "pattern": "sizzlevideoai.com",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.sizzlevideoai.com",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

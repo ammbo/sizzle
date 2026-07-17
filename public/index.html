@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Sizzle turns a repository and live app into a finished three-minute demo video—then critiques and recuts its own work."
+    />
+    <title>Sizzle — Your demo video, while you sleep</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header>
+      <a class="brand" href="/" aria-label="Sizzle home">
+        <span class="brand-mark">S</span>
+        <span>Sizzle</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="#how">How it works</a>
+        <a href="https://github.com/ammbo/sizzle">Source</a>
+        <span class="status"><i></i> Qwen Cloud</span>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">AI SHOWRUNNER FOR SOFTWARE</p>
+        <h1>Ship the project.<br /><em>The video ships itself.</em></h1>
+        <p class="lede">
+          Give Sizzle a repo and a running app. It writes the story, directs the
+          browser, generates the impossible shots, cuts the footage—and watches
+          its own work until it passes.
+        </p>
+
+        <form id="create-form" class="create-card">
+          <div class="field">
+            <label for="repo-url">Repository URL</label>
+            <input
+              id="repo-url"
+              name="repo_url"
+              type="url"
+              placeholder="https://github.com/you/your-project"
+              required
+              autocomplete="url"
+            />
+          </div>
+          <div class="field">
+            <label for="app-url">Live app URL <span>optional</span></label>
+            <input
+              id="app-url"
+              name="app_url"
+              type="url"
+              placeholder="https://your-project.example"
+              autocomplete="url"
+            />
+          </div>
+          <button type="submit">
+            <span>Make my demo</span>
+            <span aria-hidden="true">→</span>
+          </button>
+          <p id="form-message" class="form-message" role="status"></p>
+        </form>
+
+        <div class="proof-row" aria-label="Product capabilities">
+          <div><strong>≤180s</strong><span>hard duration cap</span></div>
+          <div><strong>3 lanes</strong><span>generate · capture · render</span></div>
+          <div><strong>Self-critic</strong><span>scores, revises, recuts</span></div>
+        </div>
+      </section>
+
+      <section class="critic-scene" aria-label="The critic loop">
+        <div class="frame">
+          <div class="frame-bar">
+            <span></span><span></span><span></span>
+            <b>CUT_03 · CRITIC REVIEW</b>
+          </div>
+          <div class="frame-content">
+            <p class="timecode">00:20—00:50</p>
+            <blockquote>“Pacing flat. Value prop unclear.”</blockquote>
+            <div class="score">
+              <span>ITERATION 2</span>
+              <strong>81</strong>
+              <small>/ 100</small>
+            </div>
+            <div class="directive">
+              <span>DIRECTIVE</span>
+              <code>RETIME(b03, -4s)</code>
+            </div>
+          </div>
+        </div>
+        <div class="recut">RECUTTING <span></span></div>
+      </section>
+
+      <section id="how" class="how">
+        <p class="eyebrow">ONE PROMPT. AN ENTIRE CREW.</p>
+        <h2>A closed loop, not a content generator.</h2>
+        <div class="steps">
+          <article>
+            <span>01</span>
+            <h3>Find the story</h3>
+            <p>Qwen reads your README, manifests, and commit history to find the build’s narrative arc.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Direct every shot</h3>
+            <p>A budget solver routes each beat to real browser capture, generated video, or deterministic motion graphics.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Watch. Judge. Recut.</h3>
+            <p>A multimodal critic scores the finished cut and issues typed revisions. The best cut always wins.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span>SIZZLE</span>
+      <p>Built on Qwen Cloud · Track 2: AI Showrunner</p>
+    </footer>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
