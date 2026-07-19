@@ -71,8 +71,9 @@ async function startLogin(runId, loginBtn) {
 }
 
 async function loadRfb() {
+  // npm lib/ is CommonJS (uses `exports`); use the upstream ESM sources instead
   const mod = await import(
-    "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/rfb.js"
+    "https://cdn.jsdelivr.net/gh/novnc/noVNC@v1.5.0/core/rfb.js"
   );
   return mod.default;
 }
@@ -205,10 +206,15 @@ function showLiveViewModal(runId, session) {
       rfb.addEventListener("disconnect", (e) => {
         if (closed) return;
         if (!e.detail?.clean) {
+          const reason = e.detail?.reason || "";
+          const msg = reason
+            ? `Browser session disconnected: ${reason}`
+            : "Browser session disconnected. Cancel and try again.";
+          console.error("RFB disconnect", { clean: e.detail?.clean, reason });
           wrap.replaceChildren(
             Object.assign(document.createElement("p"), {
               className: "live-view-loading error",
-              textContent: "Browser session disconnected. Cancel and try again.",
+              textContent: msg,
             }),
           );
         }

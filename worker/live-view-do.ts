@@ -71,6 +71,13 @@ export class LiveViewSession extends DurableObject {
 
     let backend: WebSocket;
     try {
+      console.log(
+        JSON.stringify({
+          event: "live_view_backend_connect",
+          sessionId: url.pathname.split("/")[2],
+          backendUrl: backendUrl.replace(/token=[^&]+/, "token=REDACTED"),
+        }),
+      );
       const resp = await fetch(backendUrl, {
         headers: {
           Upgrade: "websocket",
@@ -79,12 +86,27 @@ export class LiveViewSession extends DurableObject {
         },
       });
       if (resp.status !== 101 || !resp.webSocket) {
-        return new Response("Cannot connect to backend", { status: 502 });
+        const body = await resp.text().catch(() => "");
+        console.error(
+          JSON.stringify({
+            event: "live_view_backend_rejected",
+            status: resp.status,
+            body: body.slice(0, 500),
+          }),
+        );
+        return new Response(
+          `Backend returned ${resp.status}: ${body.slice(0, 200)}`,
+          { status: 502 },
+        );
       }
       backend = resp.webSocket;
       backend.accept();
-    } catch {
-      return new Response("Cannot connect to backend", { status: 502 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown";
+      console.error(
+        JSON.stringify({ event: "live_view_backend_error", error: msg }),
+      );
+      return new Response(`Cannot connect to backend: ${msg}`, { status: 502 });
     }
 
     this.backendWs = backend;
@@ -117,9 +139,16 @@ export class LiveViewSession extends DurableObject {
       this.cleanup();
     });
 
-    backend.addEventListener("close", () => {
+    backend.addEventListener("close", (event) => {
+      console.log(
+        JSON.stringify({
+          event: "live_view_backend_closed",
+          code: event.code,
+          reason: event.reason,
+        }),
+      );
       if (serverWs.readyState === WebSocket.OPEN) {
-        serverWs.close(1000, "Backend disconnected");
+        serverWs.close(1000, `Backend disconnected (${event.code})`);
       }
       if (this.state) this.state.connected = false;
     });
@@ -128,7 +157,10 @@ export class LiveViewSession extends DurableObject {
       this.cleanup();
     });
 
-    backend.addEventListener("error", () => {
+    backend.addEventListener("error", (event) => {
+      console.error(
+        JSON.stringify({ event: "live_view_backend_ws_error", detail: String(event) }),
+      );
       if (serverWs.readyState === WebSocket.OPEN) {
         serverWs.close(1011, "Backend error");
       }

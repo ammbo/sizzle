@@ -245,20 +245,74 @@ else
       ok "HTTP trigger exists on $LOGIN_FN"
     fi
 
-    LOGIN_WS_URL=$(aliyun fc get-function \
-      --region "$ALICLOUD_REGION" \
-      --function-name "$LOGIN_FN" 2>/dev/null \
-      | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('httpTrigger',{}).get('urlInternet') or d.get('urlInternet') or '')" 2>/dev/null || echo "")
+    # ── Custom domain for login worker WebSocket ──────────────
+    # The auto-generated fcapp.run domain strips Upgrade headers,
+    # so WebSocket connections fail. A custom domain routes directly
+    # to the container, preserving WebSocket upgrades.
+    LOGIN_DOMAIN="${FC_LOGIN_DOMAIN:-}"
+    LOGIN_WS_URL=""
+
+    if [[ -n "$LOGIN_DOMAIN" ]]; then
+      log "Configuring custom domain: $LOGIN_DOMAIN"
+      ROUTE_CONFIG='{"routes":[{"path":"/*","functionName":"'"$LOGIN_FN"'","methods":["GET","POST"]}]}'
+
+      if aliyun fc get-custom-domain --region "$ALICLOUD_REGION" --domain-name "$LOGIN_DOMAIN" >/dev/null 2>&1; then
+        aliyun fc update-custom-domain \
+          --region "$ALICLOUD_REGION" \
+          --domain-name "$LOGIN_DOMAIN" \
+          --route-config "$ROUTE_CONFIG" \
+          >/dev/null 2>&1 \
+          && ok "Updated custom domain $LOGIN_DOMAIN" \
+          || warn "Could not update custom domain $LOGIN_DOMAIN"
+      else
+        aliyun fc create-custom-domain \
+          --region "$ALICLOUD_REGION" \
+          --domain-name "$LOGIN_DOMAIN" \
+          --protocol "HTTP" \
+          --route-config "$ROUTE_CONFIG" \
+          >/dev/null 2>&1 \
+          && ok "Created custom domain $LOGIN_DOMAIN" \
+          || warn "Could not create custom domain $LOGIN_DOMAIN — check DNS setup"
+      fi
+
+      # Show CNAME target for DNS setup
+      CNAME_TARGET=$(aliyun fc get-custom-domain \
+        --region "$ALICLOUD_REGION" \
+        --domain-name "$LOGIN_DOMAIN" 2>/dev/null \
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cnameTarget',''))" 2>/dev/null || echo "")
+      if [[ -n "$CNAME_TARGET" ]]; then
+        ok "CNAME target: $CNAME_TARGET"
+        echo ""
+        echo -e "  ${YELLOW}DNS: $LOGIN_DOMAIN CNAME → $CNAME_TARGET${NC}"
+        echo -e "  ${YELLOW}(Cloudflare: DNS-only / gray cloud — no proxy)${NC}"
+        echo ""
+      fi
+
+      LOGIN_WS_URL="http://$LOGIN_DOMAIN"
+    fi
+
+    # Fall back to fcapp.run URL if no custom domain (WebSocket won't work)
     if [[ -z "$LOGIN_WS_URL" ]]; then
-      LOGIN_WS_URL=$(aliyun fc list-triggers \
+      LOGIN_WS_URL=$(aliyun fc get-function \
         --region "$ALICLOUD_REGION" \
         --function-name "$LOGIN_FN" 2>/dev/null \
-        | python3 -c "import sys,json; ts=json.load(sys.stdin).get('triggers',[]);
+        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('httpTrigger',{}).get('urlInternet') or d.get('urlInternet') or '')" 2>/dev/null || echo "")
+      if [[ -z "$LOGIN_WS_URL" ]]; then
+        LOGIN_WS_URL=$(aliyun fc list-triggers \
+          --region "$ALICLOUD_REGION" \
+          --function-name "$LOGIN_FN" 2>/dev/null \
+          | python3 -c "import sys,json; ts=json.load(sys.stdin).get('triggers',[]);
 print(next((t.get('httpTrigger',{}).get('urlInternet','') for t in ts if t.get('triggerType')=='http'),''))" 2>/dev/null || echo "")
+      fi
+      if [[ -n "$LOGIN_WS_URL" ]]; then
+        warn "Using fcapp.run URL (no WebSocket support): $LOGIN_WS_URL"
+        warn "Set FC_LOGIN_DOMAIN in deploy.conf to enable WebSocket"
+      fi
     fi
+
     if [[ -n "$LOGIN_WS_URL" ]]; then
       ok "Login WS URL: $LOGIN_WS_URL"
-      # Rebuild env with login URL and update API + login functions
+      # Rebuild env with login URL and update API function
       FC_ENV_VARS=$(python3 -c "
 import json, os
 print(json.dumps({
