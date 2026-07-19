@@ -40,12 +40,13 @@ Rules:
 - Shot durations must sum to at most {duration}s. Aim for {duration}s exactly.
 - 5 to 8 beats; each beat has 1 to 3 shots; shots are 5 to 20 seconds.
 - spec.kind is one of: "generate" (prompt: cinematic text-to-video prompt),
-  "capture" (goal: what the app should be seen doing — a goal, not a click script),
+  "capture" (goal: what part of the public website to show — e.g. "hero section and value prop",
+             "features overview", "live UI demo". The capture agent screenshots the public site.),
   "render" (template: one of "title_card", "code_snippet", "architecture", "metric_plate";
             payload: template data, e.g. {{"title": "...", "subtitle": "..."}} for title_card,
             {{"code": "...", "language": "...", "caption": "..."}} for code_snippet,
             {{"lines": ["..."]}} for architecture, {{"metrics": [{{"label": "...", "value": "..."}}]}} for metric_plate).
-- Mark a beat filmable=true only if a live app could be filmed doing it.
+- Mark a beat filmable=true only if the public website could be screenshotted showing it.
 - Mark is_static_information=true for beats that are just facts on screen (arch, metrics, titles).
 - Every shot needs an acceptance predicate: one sentence, checkable on a single frame.
 - VO lines: spoken-word pace is about 2.5 words per second; fit the shot duration.
@@ -132,8 +133,8 @@ def _stub_beat_sheet(cfg: Config, repo: RepoContext) -> BeatSheet:
              "acceptance": "frame shows the product name as a title card",
              "vo": f"This is {repo.name}."},
             {"id": "s03", "beat_id": "b03", "duration_s": 15,
-             "spec": {"kind": "capture", "goal": "show the app's core flow producing visible output"},
-             "acceptance": "frame shows the app UI with generated output visible",
+             "spec": {"kind": "capture", "goal": "show the landing page hero section with the main value proposition"},
+             "acceptance": "frame shows the website landing page with headline visible",
              "vo": "Point it at a repo and a running app. It does the rest."},
             {"id": "s04", "beat_id": "b04", "duration_s": 15,
              "spec": {"kind": "render", "template": "architecture",

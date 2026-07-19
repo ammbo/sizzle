@@ -150,35 +150,11 @@ class RunManifest(BaseModel):
     repo_url: str
     app_url: str | None = None
     is_private_repo: bool = False
-    authenticated_capture: bool = False
     shots: list[ShotRecord] = Field(default_factory=list)
     cost: CostReport = Field(default_factory=CostReport)
     critic_scores: list[float] = Field(default_factory=list)
     final_cut: str = ""
     final_duration_s: float = 0.0
-
-
-# ---------------------------------------------------------------- browser auth
-
-
-class BrowserAuthSession(BaseModel):
-    """Active live-view session metadata."""
-
-    session_id: str
-    ws_url: str = ""
-    created_at: float = 0.0
-    ttl_seconds: int = 300
-    status: Literal["waiting", "authenticated", "expired", "error"] = "waiting"
-
-
-class EncryptedStateRef(BaseModel):
-    """Reference to an encrypted browser state stored in OSS."""
-
-    run_id: str
-    oss_key: str
-    origin: str
-    created_at: float
-    ttl_seconds: int = 3600
 
 
 # ---------------------------------------------------------------- critic directives

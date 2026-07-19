@@ -12,8 +12,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgbm1 \
         libasound2 \
         git \
-        xvfb \
-        x11vnc \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -32,7 +30,6 @@ RUN playwright install --with-deps chromium 2>/dev/null || true
 # Copy the FC handler modules
 COPY infra/alicloud/pipeline_worker.py /app/
 COPY infra/alicloud/render_worker.py /app/
-COPY infra/alicloud/login_worker.py /app/
 COPY infra/alicloud/fc_entrypoint.py /app/
 
 # FC 3.0 custom container runtime: serves invocations over HTTP.

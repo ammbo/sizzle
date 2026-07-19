@@ -70,13 +70,6 @@ class Config:
     github_app_id: int = field(default_factory=lambda: int(os.environ.get("GITHUB_APP_ID", "") or "0"))
     github_app_private_key: str = field(default_factory=lambda: _load_github_key())
 
-    # Browser auth (authenticated app capture)
-    state_encryption_key: str = field(
-        default_factory=lambda: os.environ.get("SIZZLE_STATE_ENCRYPTION_KEY", "")
-    )
-    browser_auth_ttl_s: int = 3600
-    browser_auth_session_ttl_s: int = 300
-
     def apply_endpoints(self) -> None:
         import dashscope
 

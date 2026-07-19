@@ -1,7 +1,8 @@
-"""Capture agent (PRD §7.1, §9.3): drive the live app with Playwright, let qwen3.7-plus
-pick the next action from a screenshot, record video, then visually verify the money shot
-landed. A visual acceptance test on autonomously-produced footage is a closed
-perception-action loop.
+"""Capture lane: screenshot the public website and convert to video clips.
+
+Loads the app URL in headless Playwright, optionally asks Qwen where to
+scroll or click to find the content described in the shot goal, then
+converts the screenshot to a clip with a slow zoom-in effect.
 """
 
 from __future__ import annotations
@@ -9,106 +10,23 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import Config
-from ..ffmpeg import conform_clip, extract_frames, still_to_clip
+from ..ffmpeg import still_to_clip
 from ..qwen import vision_json
-from ..schema import CaptureSpec, Shot, VerifierResult
+from ..schema import CaptureSpec, Shot
 
-AGENT_SYSTEM = """You operate a web app through a browser to film a demo shot.
-You see a screenshot and a goal. Choose ONE next action. Return only JSON:
+SCOUT_SYSTEM = """You see a screenshot of a public website. The user wants to capture a specific part of the site.
 
-{"action": "click" | "type" | "press" | "scroll" | "wait" | "done",
- "selector": "css selector (for click/type)",
- "text": "text to type (for type)",
- "key": "key name (for press, e.g. Enter)",
- "dy": 400,
- "reason": "one short sentence"}
+Given the goal, decide ONE action. Return only JSON:
 
-Rules: prefer visible, specific selectors (button text, aria labels, placeholders).
-Use "wait" when the page is loading. Use "done" only when the goal is visibly achieved
-on screen. Do not navigate away from the app."""
+{{"action": "screenshot" | "scroll" | "click",
+ "selector": "css selector (for click only)",
+ "dy": 600,
+ "reason": "one short sentence"}}
 
-VERIFIER_SYSTEM = """You are a strict visual verifier for demo footage. You are shown
-sampled frames from a screen recording plus an acceptance predicate. Answer the closed
-question: does at least one frame satisfy the predicate? Return only JSON:
-
-{"satisfied": true/false,
- "failure_mode": null | "SPINNER" | "ERROR_STATE" | "WRONG_SCREEN" | "OCCLUDED" | "TIMEOUT",
- "evidence_frame": <index of the deciding frame>,
- "suggested_fix": null | "one short actionable sentence"}"""
-
-
-def _drive(
-    cfg: Config,
-    spec: CaptureSpec,
-    video_dir: Path,
-    hint: str | None,
-    *,
-    storage_state: dict | None = None,
-) -> tuple[Path, int]:
-    """One recorded attempt at the goal. Returns (raw video path, tokens spent)."""
-    from playwright.sync_api import sync_playwright
-
-    tokens_total = 0
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        context_kwargs: dict = {
-            "viewport": {"width": spec.viewport[0], "height": spec.viewport[1]},
-            "record_video_dir": str(video_dir),
-            "record_video_size": {"width": spec.viewport[0], "height": spec.viewport[1]},
-        }
-        if storage_state:
-            context_kwargs["storage_state"] = storage_state
-        context = browser.new_context(**context_kwargs)
-        page = context.new_page()
-        page.goto(spec.start_url, wait_until="networkidle")
-
-        goal = spec.goal if not hint else f"{spec.goal}\n\nPrevious attempt failed; fix: {hint}"
-        for step in range(spec.max_steps):
-            shot_path = video_dir / f"step_{step:02d}.png"
-            page.screenshot(path=str(shot_path))
-            decision, tokens = vision_json(
-                cfg, cfg.models.capture, AGENT_SYSTEM,
-                f"Goal: {goal}\nStep {step + 1} of {spec.max_steps}. What is the next action?",
-                [str(shot_path)],
-            )
-            tokens_total += tokens
-            action = decision.get("action", "wait")
-            try:
-                if action == "done":
-                    page.wait_for_timeout(1500)  # linger on the money shot
-                    break
-                elif action == "click":
-                    page.click(decision["selector"], timeout=5000)
-                elif action == "type":
-                    page.fill(decision["selector"], decision.get("text", ""), timeout=5000)
-                elif action == "press":
-                    page.keyboard.press(decision.get("key", "Enter"))
-                elif action == "scroll":
-                    page.mouse.wheel(0, int(decision.get("dy", 400)))
-                else:
-                    page.wait_for_timeout(1500)
-                page.wait_for_load_state("networkidle", timeout=8000)
-            except Exception:
-                continue  # agent sees the unchanged screen next step and adapts
-
-        video = page.video
-        context.close()
-        browser.close()
-        raw = Path(video.path())
-    return raw, tokens_total
-
-
-def verify(cfg: Config, clip: Path, acceptance: str, work_dir: Path) -> tuple[VerifierResult, int]:
-    """Sample frames and ask the VLM the closed acceptance question (PRD §9.3)."""
-    if cfg.dry_run:
-        return VerifierResult(satisfied=True, evidence_frame=0), 0
-    frames = extract_frames(clip, work_dir / "verify_frames", n=6)
-    raw, tokens = vision_json(
-        cfg, cfg.models.critic, VERIFIER_SYSTEM,
-        f"Acceptance predicate: {acceptance}\nFrames are in order, indexed from 0.",
-        [str(f) for f in frames],
-    )
-    return VerifierResult.model_validate(raw), tokens
+Use "screenshot" when the current view already shows what the goal describes.
+Use "scroll" to scroll down and reveal content below the fold.
+Use "click" to click a navigation link or tab to reach a different page or section.
+Do not navigate away from the site's domain."""
 
 
 def capture_shot(
@@ -116,13 +34,10 @@ def capture_shot(
     shot: Shot,
     app_url: str,
     out_dir: Path,
-    *,
-    storage_state: dict | None = None,
 ) -> tuple[Path | None, int, int, str]:
-    """Attempt the capture up to capture_max_attempts times, verifying each take.
+    """Screenshot the public site, guided by the shot goal.
 
-    Returns (clip or None on total failure, attempts, tokens, verifier_outcome).
-    On failure the caller demotes the shot to RENDER (PRD §9.3).
+    Returns (clip or None, attempts, tokens, outcome).
     """
     assert isinstance(shot.spec, CaptureSpec)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -133,25 +48,66 @@ def capture_shot(
         _stub_capture(cfg, shot, out_dir, clip)
         return clip, 1, 0, "pass"
 
+    from playwright.sync_api import sync_playwright
+
     tokens_total = 0
-    hint: str | None = None
-    for attempt in range(1, cfg.capture_max_attempts + 1):
-        attempt_dir = out_dir / f"attempt_{attempt}"
-        attempt_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            raw, tokens = _drive(cfg, spec, attempt_dir, hint, storage_state=storage_state)
-        except Exception as e:
-            hint = f"browser session failed: {e}"
-            continue
-        tokens_total += tokens
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(
+                viewport={"width": spec.viewport[0], "height": spec.viewport[1]},
+            )
+            page = context.new_page()
+            page.goto(spec.start_url, wait_until="networkidle", timeout=30000)
+
+            screenshot = out_dir / "capture_final.png"
+            max_scout_steps = min(spec.max_steps, 3)
+
+            for step in range(max_scout_steps):
+                step_img = out_dir / f"scout_{step:02d}.png"
+                page.screenshot(path=str(step_img))
+
+                decision, tokens = vision_json(
+                    cfg, cfg.models.capture, SCOUT_SYSTEM,
+                    f"Goal: {spec.goal}",
+                    [str(step_img)],
+                )
+                tokens_total += tokens
+                action = decision.get("action", "screenshot")
+
+                if action == "screenshot":
+                    screenshot = step_img
+                    break
+                elif action == "scroll":
+                    dy = int(decision.get("dy", 600))
+                    page.mouse.wheel(0, dy)
+                    page.wait_for_timeout(800)
+                elif action == "click":
+                    selector = decision.get("selector", "")
+                    if selector:
+                        try:
+                            page.click(selector, timeout=5000)
+                            page.wait_for_load_state("networkidle", timeout=8000)
+                        except Exception:
+                            pass  # couldn't click; take what we have
+                else:
+                    screenshot = step_img
+                    break
+            else:
+                # Took all scout steps without a "screenshot" action — use last screenshot
+                final_img = out_dir / "scout_final.png"
+                page.screenshot(path=str(final_img))
+                screenshot = final_img
+
+            context.close()
+            browser.close()
+
         clip = out_dir / f"{shot.id}.mp4"
-        conform_clip(raw, clip, shot.duration_s, cfg.resolution, cfg.fps)
-        result, vtokens = verify(cfg, clip, shot.acceptance, attempt_dir)
-        tokens_total += vtokens
-        if result.satisfied:
-            return clip, attempt, tokens_total, "pass"
-        hint = result.suggested_fix or f"failure mode: {result.failure_mode}"
-    return None, cfg.capture_max_attempts, tokens_total, hint or "TIMEOUT"
+        still_to_clip(screenshot, clip, shot.duration_s, cfg.resolution, cfg.fps)
+        return clip, 1, tokens_total, "pass"
+
+    except Exception as e:
+        return None, 1, tokens_total, f"capture_failed: {e}"
 
 
 def _stub_capture(cfg: Config, shot: Shot, out_dir: Path, dest: Path) -> None:

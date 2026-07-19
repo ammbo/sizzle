@@ -68,9 +68,6 @@ print(json.dumps({
     'EDGE_API_TOKEN': os.environ['EDGE_API_TOKEN'],
     'GITHUB_APP_ID': os.environ.get('GITHUB_APP_ID', ''),
     'GITHUB_APP_PRIVATE_KEY': os.environ.get('GITHUB_APP_PRIVATE_KEY', ''),
-    'SIZZLE_STATE_ENCRYPTION_KEY': os.environ.get('SIZZLE_STATE_ENCRYPTION_KEY', ''),
-    'BROWSER_AUTH_TTL': os.environ.get('BROWSER_AUTH_TTL', '3600'),
-    'SIZZLE_FC_LOGIN_FUNCTION': '${FC_FUNCTION_LOGIN:-sizzle-login-worker}',
 }, separators=(',',':')))
 ")
 
@@ -188,11 +185,10 @@ else
     # ── 4. Worker Functions (custom container) ─────────────────
     CONTAINER_CONFIG='{"image":"'"${CR_IMAGE}"'","port":9000,"registryConfig":{"authConfig":{"userName":"ammbo","password":"'"${GH_TOKEN}"'"}}}'
 
-    for FUNC_NAME in "$FC_FUNCTION_PIPELINE" "$FC_FUNCTION_RENDER" "${FC_FUNCTION_LOGIN:-sizzle-login-worker}"; do
+    for FUNC_NAME in "$FC_FUNCTION_PIPELINE" "$FC_FUNCTION_RENDER"; do
       case "$FUNC_NAME" in
         *pipeline*) FUNC_CPU=$FC_PIPELINE_CPU; FUNC_MEM=$FC_PIPELINE_MEMORY; FUNC_TO=$FC_PIPELINE_TIMEOUT; FUNC_DISK=$FC_PIPELINE_DISK; HANDLER="pipeline_worker.handler" ;;
         *render*)   FUNC_CPU=$FC_RENDER_CPU;   FUNC_MEM=$FC_RENDER_MEMORY;   FUNC_TO=$FC_RENDER_TIMEOUT;   FUNC_DISK=512; HANDLER="render_worker.handler" ;;
-        *login*)    FUNC_CPU=${FC_LOGIN_CPU:-1}; FUNC_MEM=${FC_LOGIN_MEMORY:-2048}; FUNC_TO=${FC_LOGIN_TIMEOUT:-600}; FUNC_DISK=512; HANDLER="login_worker.handler" ;;
       esac
 
       log "Deploying FC function: $FUNC_NAME"
@@ -227,124 +223,6 @@ else
       fi
     done
 
-    # HTTP trigger for login worker (WebSocket live-view)
-    LOGIN_FN="${FC_FUNCTION_LOGIN:-sizzle-login-worker}"
-    log "Ensuring HTTP trigger on $LOGIN_FN"
-    if ! aliyun fc list-triggers --region "$ALICLOUD_REGION" --function-name "$LOGIN_FN" 2>/dev/null \
-      | python3 -c "import sys,json; ts=json.load(sys.stdin).get('triggers',[]); sys.exit(0 if any(t.get('triggerType')=='http' for t in ts) else 1)" 2>/dev/null; then
-      aliyun fc create-trigger \
-        --region "$ALICLOUD_REGION" \
-        --function-name "$LOGIN_FN" \
-        --trigger-name "http" \
-        --trigger-type "http" \
-        --trigger-config '{"methods":["GET","POST"],"authType":"anonymous","disableURLInternet":false}' \
-        >/dev/null 2>&1 \
-        && ok "Created HTTP trigger on $LOGIN_FN" \
-        || warn "Could not create HTTP trigger on $LOGIN_FN"
-    else
-      ok "HTTP trigger exists on $LOGIN_FN"
-    fi
-
-    # ── Custom domain for login worker WebSocket ──────────────
-    # The auto-generated fcapp.run domain strips Upgrade headers,
-    # so WebSocket connections fail. A custom domain routes directly
-    # to the container, preserving WebSocket upgrades.
-    LOGIN_DOMAIN="${FC_LOGIN_DOMAIN:-}"
-    LOGIN_WS_URL=""
-
-    if [[ -n "$LOGIN_DOMAIN" ]]; then
-      log "Configuring custom domain: $LOGIN_DOMAIN"
-      ROUTE_CONFIG='{"routes":[{"path":"/*","functionName":"'"$LOGIN_FN"'","methods":["GET","POST"]}]}'
-
-      if aliyun fc get-custom-domain --region "$ALICLOUD_REGION" --domain-name "$LOGIN_DOMAIN" >/dev/null 2>&1; then
-        aliyun fc update-custom-domain \
-          --region "$ALICLOUD_REGION" \
-          --domain-name "$LOGIN_DOMAIN" \
-          --route-config "$ROUTE_CONFIG" \
-          >/dev/null 2>&1 \
-          && ok "Updated custom domain $LOGIN_DOMAIN" \
-          || warn "Could not update custom domain $LOGIN_DOMAIN"
-      else
-        aliyun fc create-custom-domain \
-          --region "$ALICLOUD_REGION" \
-          --domain-name "$LOGIN_DOMAIN" \
-          --protocol "HTTP" \
-          --route-config "$ROUTE_CONFIG" \
-          >/dev/null 2>&1 \
-          && ok "Created custom domain $LOGIN_DOMAIN" \
-          || warn "Could not create custom domain $LOGIN_DOMAIN — check DNS setup"
-      fi
-
-      # Show CNAME target for DNS setup
-      CNAME_TARGET=$(aliyun fc get-custom-domain \
-        --region "$ALICLOUD_REGION" \
-        --domain-name "$LOGIN_DOMAIN" 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('cnameTarget',''))" 2>/dev/null || echo "")
-      if [[ -n "$CNAME_TARGET" ]]; then
-        ok "CNAME target: $CNAME_TARGET"
-        echo ""
-        echo -e "  ${YELLOW}DNS: $LOGIN_DOMAIN CNAME → $CNAME_TARGET${NC}"
-        echo -e "  ${YELLOW}(Cloudflare: DNS-only / gray cloud — no proxy)${NC}"
-        echo ""
-      fi
-
-      LOGIN_WS_URL="http://$LOGIN_DOMAIN"
-    fi
-
-    # Fall back to fcapp.run URL if no custom domain (WebSocket won't work)
-    if [[ -z "$LOGIN_WS_URL" ]]; then
-      LOGIN_WS_URL=$(aliyun fc get-function \
-        --region "$ALICLOUD_REGION" \
-        --function-name "$LOGIN_FN" 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('httpTrigger',{}).get('urlInternet') or d.get('urlInternet') or '')" 2>/dev/null || echo "")
-      if [[ -z "$LOGIN_WS_URL" ]]; then
-        LOGIN_WS_URL=$(aliyun fc list-triggers \
-          --region "$ALICLOUD_REGION" \
-          --function-name "$LOGIN_FN" 2>/dev/null \
-          | python3 -c "import sys,json; ts=json.load(sys.stdin).get('triggers',[]);
-print(next((t.get('httpTrigger',{}).get('urlInternet','') for t in ts if t.get('triggerType')=='http'),''))" 2>/dev/null || echo "")
-      fi
-      if [[ -n "$LOGIN_WS_URL" ]]; then
-        warn "Using fcapp.run URL (no WebSocket support): $LOGIN_WS_URL"
-        warn "Set FC_LOGIN_DOMAIN in deploy.conf to enable WebSocket"
-      fi
-    fi
-
-    if [[ -n "$LOGIN_WS_URL" ]]; then
-      ok "Login WS URL: $LOGIN_WS_URL"
-      # Rebuild env with login URL and update API function
-      FC_ENV_VARS=$(python3 -c "
-import json, os
-print(json.dumps({
-    'DASHSCOPE_API_KEY': os.environ['DASHSCOPE_API_KEY'],
-    'ALIBABA_CLOUD_ACCESS_KEY_ID': os.environ['ALIBABA_CLOUD_ACCESS_KEY_ID'],
-    'ALIBABA_CLOUD_ACCESS_KEY_SECRET': os.environ['ALIBABA_CLOUD_ACCESS_KEY_SECRET'],
-    'ALIBABA_CLOUD_REGION': '$ALICLOUD_REGION',
-    'OSS_ENDPOINT': '$OSS_ENDPOINT',
-    'OSS_BUCKET': '$OSS_BUCKET',
-    'OSS_ACCESS_KEY_ID': os.environ['ALIBABA_CLOUD_ACCESS_KEY_ID'],
-    'OSS_ACCESS_KEY_SECRET': os.environ['ALIBABA_CLOUD_ACCESS_KEY_SECRET'],
-    'SIZZLE_FC_ENDPOINT': '$SIZZLE_FC_ENDPOINT',
-    'SIZZLE_FC_PIPELINE_FUNCTION': '$FC_FUNCTION_PIPELINE',
-    'EDGE_API_TOKEN': os.environ['EDGE_API_TOKEN'],
-    'GITHUB_APP_ID': os.environ.get('GITHUB_APP_ID', ''),
-    'GITHUB_APP_PRIVATE_KEY': os.environ.get('GITHUB_APP_PRIVATE_KEY', ''),
-    'SIZZLE_STATE_ENCRYPTION_KEY': os.environ.get('SIZZLE_STATE_ENCRYPTION_KEY', ''),
-    'BROWSER_AUTH_TTL': os.environ.get('BROWSER_AUTH_TTL', '3600'),
-    'SIZZLE_FC_LOGIN_FUNCTION': '${FC_FUNCTION_LOGIN:-sizzle-login-worker}',
-    'SIZZLE_LOGIN_WS_URL': '$LOGIN_WS_URL',
-}, separators=(',',':')))
-")
-      aliyun fc update-function \
-        --region "$ALICLOUD_REGION" \
-        --function-name "$FC_FUNCTION_API" \
-        --environment-variables "$FC_ENV_VARS" \
-        >/dev/null 2>&1 \
-        && ok "API updated with SIZZLE_LOGIN_WS_URL" \
-        || warn "Could not update API env with login URL"
-    else
-      warn "Could not resolve login HTTP URL — interactive login will return 503"
-    fi
   else
     warn "gh CLI not authenticated — skipping worker function deployment"
   fi

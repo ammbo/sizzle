@@ -19,7 +19,6 @@ from urllib.parse import urlparse
 import base64
 import email.utils
 import hashlib
-import secrets
 import urllib.request
 import urllib.error
 
@@ -27,9 +26,6 @@ import oss2
 from oss2.credentials import EnvironmentVariableCredentialsProvider
 
 RUN_ID = re.compile(r"^run_[a-f0-9]{24}$")
-LOGIN_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login$")
-LOGIN_COMPLETE_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login/complete$")
-LOGIN_CANCEL_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login/cancel$")
 
 
 def _bucket() -> oss2.Bucket:
@@ -184,10 +180,7 @@ def handler(event: bytes, context) -> dict:
         }
         _save_job(job)
         _invoke_pipeline(job)
-        resp = {"run_id": run_id, "status": "queued"}
-        if app_url:
-            resp["login_available"] = True
-        return _response(resp, 202)
+        return _response({"run_id": run_id, "status": "queued"}, 202)
 
     # Get run status
     if method == "GET" and path.startswith("/api/runs/"):
@@ -215,134 +208,5 @@ def handler(event: bytes, context) -> dict:
         if job.get("final_cut_key"):
             result["final_cut_url"] = _bucket().sign_url("GET", job["final_cut_key"], 900)
         return _response(result)
-
-    # Start login session — credentials only; browser starts when the live WS connects
-    login_match = LOGIN_PATH.fullmatch(path)
-    if method == "POST" and login_match:
-        run_id = login_match.group(1)
-        try:
-            job = _load_job(run_id)
-        except oss2.exceptions.NoSuchKey:
-            return _response({"error": "not_found"}, 404)
-        if not job.get("app_url"):
-            return _response({"error": "no_app_url", "message": "Run has no app_url"}, 400)
-
-        login_ws = os.environ.get("SIZZLE_LOGIN_WS_URL", "").strip()
-        if not login_ws:
-            return _response(
-                {
-                    "error": "login_unavailable",
-                    "message": "Interactive login is not configured on this deployment",
-                },
-                503,
-            )
-
-        session_id = f"login_{secrets.token_hex(12)}"
-        auth_token = secrets.token_urlsafe(24)
-
-        # Clear prior signals so a retry does not immediately complete/cancel
-        for key in (
-            f"runs/{run_id}/login_complete",
-            f"runs/{run_id}/login_cancel",
-            f"runs/{run_id}/browser_state.enc",
-        ):
-            try:
-                _bucket().delete_object(key)
-            except Exception:
-                pass
-
-        session_meta = {
-            "session_id": session_id,
-            "run_id": run_id,
-            "app_url": job["app_url"],
-            "auth_token": auth_token,
-            "status": "pending",
-        }
-        _bucket().put_object(
-            f"runs/{run_id}/login_session.json",
-            json.dumps(session_meta),
-            headers={"content-type": "application/json"},
-        )
-
-        job["login_session_id"] = session_id
-        job["login_status"] = "pending"
-        _save_job(job)
-
-        # backend is the FC login HTTP trigger; DO proxies browser ↔ this URL
-        sep = "&" if "?" in login_ws else "?"
-        backend = (
-            f"{login_ws}{sep}run_id={run_id}"
-            f"&session_id={session_id}&token={auth_token}"
-        )
-        return _response(
-            {
-                "session_id": session_id,
-                "token": auth_token,
-                "backend": backend,
-                "status": "pending",
-            },
-            202,
-        )
-
-    # Complete login session
-    complete_match = LOGIN_COMPLETE_PATH.fullmatch(path)
-    if method == "POST" and complete_match:
-        run_id = complete_match.group(1)
-        try:
-            job = _load_job(run_id)
-        except oss2.exceptions.NoSuchKey:
-            return _response({"error": "not_found"}, 404)
-
-        # Signal the login worker to capture state
-        _bucket().put_object(
-            f"runs/{run_id}/login_complete",
-            b"1",
-            headers={"content-type": "application/octet-stream"},
-        )
-
-        # Poll for the browser state to appear
-        import time
-
-        state_key = f"runs/{run_id}/browser_state.enc"
-        deadline = time.time() + 60
-        found = False
-        while time.time() < deadline:
-            try:
-                _bucket().get_object_meta(state_key)
-                found = True
-                break
-            except oss2.exceptions.NoSuchKey:
-                time.sleep(1)
-
-        if found:
-            job["browser_state_key"] = state_key
-            job["login_status"] = "captured"
-            _save_job(job)
-            return _response({"status": "ok", "browser_state_key": state_key})
-        else:
-            job["login_status"] = "capture_timeout"
-            _save_job(job)
-            return _response(
-                {"error": "capture_timeout", "message": "Browser state capture timed out"},
-                504,
-            )
-
-    # Cancel login session
-    cancel_match = LOGIN_CANCEL_PATH.fullmatch(path)
-    if method == "POST" and cancel_match:
-        run_id = cancel_match.group(1)
-        try:
-            job = _load_job(run_id)
-        except oss2.exceptions.NoSuchKey:
-            return _response({"error": "not_found"}, 404)
-
-        _bucket().put_object(
-            f"runs/{run_id}/login_cancel",
-            b"1",
-            headers={"content-type": "application/octet-stream"},
-        )
-        job["login_status"] = "cancelled"
-        _save_job(job)
-        return _response({"status": "cancelled"})
 
     return _response({"error": "not_found"}, 404)

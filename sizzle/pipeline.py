@@ -4,7 +4,6 @@ produce -> assemble -> critique -> revise, keeping the best cut ever produced (m
 
 from __future__ import annotations
 
-import os
 import time
 import uuid
 from pathlib import Path
@@ -56,7 +55,6 @@ class Run:
         self.demoted: list[str] = []
         self.planning_tokens = 0
         self.critic_tokens = 0
-        self.storage_state: dict | None = None
 
     # ------------------------------------------------------------- production
 
@@ -83,7 +81,6 @@ class Run:
         else:  # CAPTURE
             clip_opt, attempts, tokens, outcome = capture_shot(
                 self.cfg, shot, self.app_url or "", shot_dir,
-                storage_state=self.storage_state,
             )
             rec.model = self.cfg.models.capture
             rec.attempts = attempts
@@ -194,7 +191,6 @@ def make_demo_video(
     cfg: Config,
     repo_url: str,
     app_url: str | None = None,
-    browser_state_key: str | None = None,
 ) -> RunManifest:
     """The whole product: G1 through G3 in one call."""
     run = Run(cfg, repo_url, app_url)
@@ -237,31 +233,6 @@ def make_demo_video(
     sheet, planning_tokens = write_beat_sheet(cfg, repo)
     run.planning_tokens = planning_tokens
     console.print(f"beat sheet: {len(sheet.beats)} beats, {len(sheet.shots)} shots, {sheet.total_duration():.0f}s")
-
-    # 1b. load authenticated browser state if available
-    if browser_state_key:
-        from .browser_auth import EncryptedBrowserState, decrypt_and_load
-
-        import json
-
-        try:
-            import oss2
-            from oss2.credentials import EnvironmentVariableCredentialsProvider
-
-            auth = oss2.ProviderAuthV4(EnvironmentVariableCredentialsProvider())
-            bucket = oss2.Bucket(
-                auth,
-                os.environ["OSS_ENDPOINT"],
-                os.environ["OSS_BUCKET"],
-                region=os.environ.get("ALIBABA_CLOUD_REGION", "ap-southeast-1"),
-            )
-            blob = json.loads(bucket.get_object(browser_state_key).read())
-            encrypted = EncryptedBrowserState.from_json(json.dumps(blob))
-            run.storage_state = decrypt_and_load(encrypted)
-            run.manifest.authenticated_capture = True
-            console.print("[dim]loaded authenticated browser state for capture[/]")
-        except Exception as e:
-            console.print(f"[yellow]failed to load browser state ({e}); capture will be unauthenticated[/]")
 
     # 2. allocate
     alloc = allocate(cfg, sheet, live_app_available=bool(app_url))

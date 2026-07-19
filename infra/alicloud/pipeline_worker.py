@@ -66,7 +66,6 @@ def handler(event: bytes, context) -> str:
                 cfg,
                 job["repo_url"],
                 job.get("app_url"),
-                browser_state_key=job.get("browser_state_key"),
             )
             run_dir = Path(manifest.final_cut).parent
 

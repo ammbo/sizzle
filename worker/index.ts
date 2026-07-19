@@ -4,12 +4,9 @@ const JSON_HEADERS = {
   "x-content-type-options": "nosniff",
 } as const;
 
-export { LiveViewSession } from "./live-view-do";
-
 interface Secrets {
   ALIBABA_BACKEND_URL?: string;
   ALIBABA_BACKEND_TOKEN?: string;
-  LIVE_VIEW?: DurableObjectNamespace;
 }
 
 type SizzleEnv = Env & Secrets;
@@ -91,17 +88,6 @@ export default {
         });
       }
       return proxyToAlibaba(request, env);
-    }
-
-    // WebSocket live-view: /live/{session_id}
-    if (url.pathname.startsWith("/live/") && env.LIVE_VIEW) {
-      const sessionId = url.pathname.split("/")[2];
-      if (!sessionId) {
-        return json({ error: "missing_session_id" }, 400);
-      }
-      const id = env.LIVE_VIEW.idFromName(sessionId);
-      const stub = env.LIVE_VIEW.get(id);
-      return stub.fetch(request);
     }
 
     if (url.pathname.startsWith("/api/")) {
