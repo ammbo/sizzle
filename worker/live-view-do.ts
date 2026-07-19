@@ -1,13 +1,12 @@
 /**
  * Cloudflare Durable Object that proxies noVNC WebSocket connections between
- * the user's browser and the websockify endpoint on the FC login worker.
+ * the user's browser and the websockify/VNC endpoint on the FC login worker.
  *
  * Flow:
- * 1. User connects via WebSocket to /live/{session_id}?token={auth_token}
- * 2. DO validates the token against the session metadata in OSS
- * 3. DO opens a WebSocket to the FC container's websockify port
- * 4. Messages are proxied bidirectionally
- * 5. Both sides close when either disconnects
+ * 1. User connects via WebSocket to /live/{session_id}?token={auth_token}&backend={fc_ws_url}
+ * 2. DO validates the token is present and opens a WebSocket to the FC backend
+ * 3. Messages are proxied bidirectionally
+ * 4. Both sides close when either disconnects
  */
 
 import { DurableObject } from "cloudflare:workers";
@@ -57,63 +56,99 @@ export class LiveViewSession extends DurableObject {
     }
 
     // Create WebSocket pair for the client
-    const [clientWs, serverWs] = Object.values(new WebSocketPair());
+    const pair = new WebSocketPair();
+    const clientWs = pair[0];
+    const serverWs = pair[1];
 
-    // Connect to the backend websockify
+    // Connect to the backend (FC login HTTP trigger) via fetch upgrade.
+    // Workers require an http(s) URL here — not ws(s).
+    let backendUrl = this.state.backendWsUrl;
+    if (backendUrl.startsWith("wss://")) {
+      backendUrl = "https://" + backendUrl.slice("wss://".length);
+    } else if (backendUrl.startsWith("ws://")) {
+      backendUrl = "http://" + backendUrl.slice("ws://".length);
+    }
+
+    let backend: WebSocket;
     try {
-      this.backendWs = new WebSocket(this.state.backendWsUrl);
+      const resp = await fetch(backendUrl, {
+        headers: {
+          Upgrade: "websocket",
+          Connection: "Upgrade",
+          "Sec-WebSocket-Protocol": "binary",
+        },
+      });
+      if (resp.status !== 101 || !resp.webSocket) {
+        return new Response("Cannot connect to backend", { status: 502 });
+      }
+      backend = resp.webSocket;
+      backend.accept();
     } catch {
       return new Response("Cannot connect to backend", { status: 502 });
     }
 
+    this.backendWs = backend;
     this.state.connected = true;
+    serverWs.accept();
 
     // Proxy messages: client -> backend
     serverWs.addEventListener("message", (event) => {
       if (this.backendWs?.readyState === WebSocket.OPEN) {
-        this.backendWs.send(event.data);
+        try {
+          this.backendWs.send(event.data);
+        } catch {
+          /* ignore */
+        }
       }
     });
 
     // Proxy messages: backend -> client
-    this.backendWs.addEventListener("message", (event) => {
+    backend.addEventListener("message", (event) => {
       if (serverWs.readyState === WebSocket.OPEN) {
-        serverWs.send(event.data);
+        try {
+          serverWs.send(event.data);
+        } catch {
+          /* ignore */
+        }
       }
     });
 
-    // Handle close from either side
     serverWs.addEventListener("close", () => {
       this.cleanup();
     });
 
-    this.backendWs.addEventListener("close", () => {
+    backend.addEventListener("close", () => {
       if (serverWs.readyState === WebSocket.OPEN) {
         serverWs.close(1000, "Backend disconnected");
       }
-      this.state!.connected = false;
+      if (this.state) this.state.connected = false;
     });
 
-    // Handle errors
     serverWs.addEventListener("error", () => {
       this.cleanup();
     });
 
-    this.backendWs.addEventListener("error", () => {
+    backend.addEventListener("error", () => {
       if (serverWs.readyState === WebSocket.OPEN) {
         serverWs.close(1011, "Backend error");
       }
-      this.state!.connected = false;
+      if (this.state) this.state.connected = false;
     });
 
-    serverWs.accept();
-
-    return new Response(null, { status: 101, webSocket: clientWs });
+    return new Response(null, {
+      status: 101,
+      webSocket: clientWs,
+      headers: { "Sec-WebSocket-Protocol": "binary" },
+    });
   }
 
   private cleanup(): void {
     if (this.backendWs?.readyState === WebSocket.OPEN) {
-      this.backendWs.close(1000, "Client disconnected");
+      try {
+        this.backendWs.close(1000, "Client disconnected");
+      } catch {
+        /* ignore */
+      }
     }
     this.backendWs = null;
     if (this.state) {

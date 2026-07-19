@@ -126,20 +126,22 @@ footer p { color: var(--muted); font: 11px "DM Mono"; }
 }
 .live-view-modal {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-  width: min(90vw, 1320px); max-height: 90vh; overflow: hidden;
+  width: min(90vw, 1320px); height: min(90vh, 820px);
+  display: flex; flex-direction: column; overflow: hidden;
 }
-.live-view-header { padding: 20px 24px; border-bottom: 1px solid var(--line); }
+.live-view-header { padding: 20px 24px; border-bottom: 1px solid var(--line); flex-shrink: 0; }
 .live-view-header h3 { margin: 0 0 4px; font-size: 18px; }
 .live-view-header p { margin: 0; font-size: 13px; color: var(--muted); }
 .live-view-canvas-wrap {
-  aspect-ratio: 16/9; background: #000; display: flex;
-  align-items: center; justify-content: center;
+  flex: 1; min-height: 0; background: #000; display: flex;
+  align-items: center; justify-content: center; position: relative;
 }
 .live-view-canvas-wrap canvas { width: 100%; height: 100%; }
-.live-view-loading { color: var(--muted); font: 13px "DM Mono"; }
+.live-view-loading { color: var(--muted); font: 13px "DM Mono"; padding: 24px; text-align: center; }
+.live-view-loading.error { color: var(--hot); }
 .live-view-footer {
   display: flex; gap: 12px; padding: 16px 24px;
-  border-top: 1px solid var(--line); justify-content: flex-end;
+  border-top: 1px solid var(--line); justify-content: flex-end; flex-shrink: 0;
 }
 .live-view-done {
   padding: 10px 24px; background: var(--acid); color: var(--bg);

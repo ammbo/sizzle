@@ -29,6 +29,7 @@ from oss2.credentials import EnvironmentVariableCredentialsProvider
 RUN_ID = re.compile(r"^run_[a-f0-9]{24}$")
 LOGIN_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login$")
 LOGIN_COMPLETE_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login/complete$")
+LOGIN_CANCEL_PATH = re.compile(r"^/api/runs/(run_[a-f0-9]{24})/login/cancel$")
 
 
 def _bucket() -> oss2.Bucket:
@@ -138,22 +139,6 @@ def _invoke_pipeline(job: dict) -> None:
     )
 
 
-def _invoke_login(run_id: str, app_url: str, session_id: str) -> None:
-    """Async-invoke the login worker FC function."""
-    _invoke_fc3(
-        os.environ.get("SIZZLE_FC_LOGIN_FUNCTION", "sizzle-login-worker"),
-        json.dumps({
-            "run_id": run_id,
-            "app_url": app_url,
-            "session_id": session_id,
-        }).encode(),
-        extra_headers={
-            "x-fc-invocation-type": "Async",
-            "x-fc-async-task-id": f"{run_id}_login",
-        },
-    )
-
-
 def handler(event: bytes, context) -> dict:
     """FC 3.0 HTTP trigger handler."""
     # Parse the HTTP trigger event
@@ -231,7 +216,7 @@ def handler(event: bytes, context) -> dict:
             result["final_cut_url"] = _bucket().sign_url("GET", job["final_cut_key"], 900)
         return _response(result)
 
-    # Start login session
+    # Start login session — credentials only; browser starts when the live WS connects
     login_match = LOGIN_PATH.fullmatch(path)
     if method == "POST" and login_match:
         run_id = login_match.group(1)
@@ -242,13 +227,62 @@ def handler(event: bytes, context) -> dict:
         if not job.get("app_url"):
             return _response({"error": "no_app_url", "message": "Run has no app_url"}, 400)
 
+        login_ws = os.environ.get("SIZZLE_LOGIN_WS_URL", "").strip()
+        if not login_ws:
+            return _response(
+                {
+                    "error": "login_unavailable",
+                    "message": "Interactive login is not configured on this deployment",
+                },
+                503,
+            )
+
         session_id = f"login_{secrets.token_hex(12)}"
-        _invoke_login(run_id, job["app_url"], session_id)
+        auth_token = secrets.token_urlsafe(24)
+
+        # Clear prior signals so a retry does not immediately complete/cancel
+        for key in (
+            f"runs/{run_id}/login_complete",
+            f"runs/{run_id}/login_cancel",
+            f"runs/{run_id}/browser_state.enc",
+        ):
+            try:
+                _bucket().delete_object(key)
+            except Exception:
+                pass
+
+        session_meta = {
+            "session_id": session_id,
+            "run_id": run_id,
+            "app_url": job["app_url"],
+            "auth_token": auth_token,
+            "status": "pending",
+        }
+        _bucket().put_object(
+            f"runs/{run_id}/login_session.json",
+            json.dumps(session_meta),
+            headers={"content-type": "application/json"},
+        )
 
         job["login_session_id"] = session_id
-        job["login_status"] = "starting"
+        job["login_status"] = "pending"
         _save_job(job)
-        return _response({"session_id": session_id, "status": "starting"}, 202)
+
+        # backend is the FC login HTTP trigger; DO proxies browser ↔ this URL
+        sep = "&" if "?" in login_ws else "?"
+        backend = (
+            f"{login_ws}{sep}run_id={run_id}"
+            f"&session_id={session_id}&token={auth_token}"
+        )
+        return _response(
+            {
+                "session_id": session_id,
+                "token": auth_token,
+                "backend": backend,
+                "status": "pending",
+            },
+            202,
+        )
 
     # Complete login session
     complete_match = LOGIN_COMPLETE_PATH.fullmatch(path)
@@ -270,7 +304,7 @@ def handler(event: bytes, context) -> dict:
         import time
 
         state_key = f"runs/{run_id}/browser_state.enc"
-        deadline = time.time() + 30
+        deadline = time.time() + 60
         found = False
         while time.time() < deadline:
             try:
@@ -292,5 +326,23 @@ def handler(event: bytes, context) -> dict:
                 {"error": "capture_timeout", "message": "Browser state capture timed out"},
                 504,
             )
+
+    # Cancel login session
+    cancel_match = LOGIN_CANCEL_PATH.fullmatch(path)
+    if method == "POST" and cancel_match:
+        run_id = cancel_match.group(1)
+        try:
+            job = _load_job(run_id)
+        except oss2.exceptions.NoSuchKey:
+            return _response({"error": "not_found"}, 404)
+
+        _bucket().put_object(
+            f"runs/{run_id}/login_cancel",
+            b"1",
+            headers={"content-type": "application/octet-stream"},
+        )
+        job["login_status"] = "cancelled"
+        _save_job(job)
+        return _response({"status": "cancelled"})
 
     return _response({"error": "not_found"}, 404)
