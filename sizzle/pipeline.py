@@ -4,6 +4,7 @@ produce -> assemble -> critique -> revise, keeping the best cut ever produced (m
 
 from __future__ import annotations
 
+import os
 import time
 import uuid
 from pathlib import Path
@@ -55,6 +56,7 @@ class Run:
         self.demoted: list[str] = []
         self.planning_tokens = 0
         self.critic_tokens = 0
+        self.storage_state: dict | None = None
 
     # ------------------------------------------------------------- production
 
@@ -79,7 +81,10 @@ class Run:
                 clip = render_shot(self.cfg, shot, shot_dir)
                 rec.type = ShotType.RENDER
         else:  # CAPTURE
-            clip_opt, attempts, tokens, outcome = capture_shot(self.cfg, shot, self.app_url or "", shot_dir)
+            clip_opt, attempts, tokens, outcome = capture_shot(
+                self.cfg, shot, self.app_url or "", shot_dir,
+                storage_state=self.storage_state,
+            )
             rec.model = self.cfg.models.capture
             rec.attempts = attempts
             rec.tokens_spent = tokens
@@ -185,19 +190,78 @@ class Run:
         return self.manifest
 
 
-def make_demo_video(cfg: Config, repo_url: str, app_url: str | None = None) -> RunManifest:
+def make_demo_video(
+    cfg: Config,
+    repo_url: str,
+    app_url: str | None = None,
+    browser_state_key: str | None = None,
+) -> RunManifest:
     """The whole product: G1 through G3 in one call."""
     run = Run(cfg, repo_url, app_url)
     console.print(f"[bold]sizzle[/] run {run.run_id} -> {run.dir}")
 
+    # 0. acquire GitHub token for private repos
+    github_token: str | None = None
+    if not cfg.dry_run:
+        from .github_auth import (
+            AppNotInstalledError,
+            GitHubAuthError,
+            InsufficientPermissionsError,
+            create_installation_token,
+            find_installation,
+            is_repo_accessible,
+            parse_owner_repo,
+        )
+
+        if not is_repo_accessible(repo_url):
+            try:
+                owner, repo_name = parse_owner_repo(repo_url)
+                installation_id = find_installation(owner, repo_name)
+                token_result = create_installation_token(installation_id, owner, repo_name)
+                github_token = token_result.token
+                run.manifest.is_private_repo = True
+                console.print(
+                    f"[dim]private repo detected; acquired installation token "
+                    f"(expires {token_result.expires_at})[/]"
+                )
+            except (AppNotInstalledError, InsufficientPermissionsError):
+                raise
+            except GitHubAuthError as e:
+                console.print(f"[yellow]GitHub auth failed ({e}); attempting public clone[/]")
+
     # 1. ingest + story
-    repo = ingest(repo_url, run.dir)
+    repo = ingest(repo_url, run.dir, github_token=github_token)
     console.print(f"ingested [cyan]{repo.name}[/]: {len(repo.commit_log)} commits, README {len(repo.readme)} chars")
     from .story import write_beat_sheet
 
     sheet, planning_tokens = write_beat_sheet(cfg, repo)
     run.planning_tokens = planning_tokens
     console.print(f"beat sheet: {len(sheet.beats)} beats, {len(sheet.shots)} shots, {sheet.total_duration():.0f}s")
+
+    # 1b. load authenticated browser state if available
+    if browser_state_key:
+        from .browser_auth import EncryptedBrowserState, decrypt_and_load
+
+        import json
+
+        try:
+            import oss2
+            from oss2.credentials import EnvironmentVariableCredentialsProvider
+
+            auth = oss2.ProviderAuthV4(EnvironmentVariableCredentialsProvider())
+            bucket = oss2.Bucket(
+                auth,
+                os.environ["OSS_ENDPOINT"],
+                os.environ["OSS_BUCKET"],
+                region=os.environ.get("ALIBABA_CLOUD_REGION", "ap-southeast-1"),
+            )
+            blob = json.loads(bucket.get_object(browser_state_key).read())
+            encrypted = EncryptedBrowserState.from_json(json.dumps(blob))
+            run.storage_state = decrypt_and_load(encrypted)
+            run.manifest.authenticated_capture = True
+            console.print("[dim]loaded authenticated browser state for capture[/]")
+        except Exception as e:
+            console.print(f"[yellow]failed to load browser state ({e}); capture will be unauthenticated[/]")
 
     # 2. allocate
     alloc = allocate(cfg, sheet, live_app_available=bool(app_url))

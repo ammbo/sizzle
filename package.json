@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit && wrangler deploy --dry-run",
-    "deploy": "wrangler deploy",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:cf": "wrangler deploy",
+    "deploy:alicloud": "bash scripts/deploy.sh --alicloud-only",
     "dev": "wrangler dev",
-    "types": "wrangler types worker-configuration.d.ts"
+    "types": "wrangler types worker-configuration.d.ts",
+    "setup": "bash scripts/setup.sh"
   },
   "devDependencies": {
     "@types/node": "latest",

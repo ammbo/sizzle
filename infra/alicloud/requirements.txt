@@ -1,2 +1,3 @@
-aliyun-fc2>=2.6.1
+aliyun-fc2>=2.5.0
 oss2>=2.19.1
+websockify>=0.11

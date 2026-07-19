@@ -37,18 +37,28 @@ question: does at least one frame satisfy the predicate? Return only JSON:
  "suggested_fix": null | "one short actionable sentence"}"""
 
 
-def _drive(cfg: Config, spec: CaptureSpec, video_dir: Path, hint: str | None) -> tuple[Path, int]:
+def _drive(
+    cfg: Config,
+    spec: CaptureSpec,
+    video_dir: Path,
+    hint: str | None,
+    *,
+    storage_state: dict | None = None,
+) -> tuple[Path, int]:
     """One recorded attempt at the goal. Returns (raw video path, tokens spent)."""
     from playwright.sync_api import sync_playwright
 
     tokens_total = 0
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        context = browser.new_context(
-            viewport={"width": spec.viewport[0], "height": spec.viewport[1]},
-            record_video_dir=str(video_dir),
-            record_video_size={"width": spec.viewport[0], "height": spec.viewport[1]},
-        )
+        context_kwargs: dict = {
+            "viewport": {"width": spec.viewport[0], "height": spec.viewport[1]},
+            "record_video_dir": str(video_dir),
+            "record_video_size": {"width": spec.viewport[0], "height": spec.viewport[1]},
+        }
+        if storage_state:
+            context_kwargs["storage_state"] = storage_state
+        context = browser.new_context(**context_kwargs)
         page = context.new_page()
         page.goto(spec.start_url, wait_until="networkidle")
 
@@ -101,7 +111,14 @@ def verify(cfg: Config, clip: Path, acceptance: str, work_dir: Path) -> tuple[Ve
     return VerifierResult.model_validate(raw), tokens
 
 
-def capture_shot(cfg: Config, shot: Shot, app_url: str, out_dir: Path) -> tuple[Path | None, int, int, str]:
+def capture_shot(
+    cfg: Config,
+    shot: Shot,
+    app_url: str,
+    out_dir: Path,
+    *,
+    storage_state: dict | None = None,
+) -> tuple[Path | None, int, int, str]:
     """Attempt the capture up to capture_max_attempts times, verifying each take.
 
     Returns (clip or None on total failure, attempts, tokens, verifier_outcome).
@@ -122,7 +139,7 @@ def capture_shot(cfg: Config, shot: Shot, app_url: str, out_dir: Path) -> tuple[
         attempt_dir = out_dir / f"attempt_{attempt}"
         attempt_dir.mkdir(parents=True, exist_ok=True)
         try:
-            raw, tokens = _drive(cfg, spec, attempt_dir, hint)
+            raw, tokens = _drive(cfg, spec, attempt_dir, hint, storage_state=storage_state)
         except Exception as e:
             hint = f"browser session failed: {e}"
             continue

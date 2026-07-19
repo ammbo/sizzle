@@ -82,14 +82,14 @@ def _save_job(job: dict) -> None:
 
 def _invoke_pipeline(job: dict) -> None:
     client = fc2.Client(
-        endpoint=os.environ["FC_ENDPOINT"],
+        endpoint=os.environ.get("SIZZLE_FC_ENDPOINT", os.environ.get("FC_ENDPOINT", "")),
         accessKeyID=os.environ["ALIBABA_CLOUD_ACCESS_KEY_ID"],
         accessKeySecret=os.environ["ALIBABA_CLOUD_ACCESS_KEY_SECRET"],
         securityToken=os.environ.get("ALIBABA_CLOUD_SECURITY_TOKEN"),
     )
     client.invoke_function(
-        os.environ["FC_SERVICE_NAME"],
-        os.environ["FC_PIPELINE_FUNCTION"],
+        os.environ.get("SIZZLE_FC_SERVICE_NAME", os.environ.get("FC_SERVICE_NAME", "")),
+        os.environ.get("SIZZLE_FC_PIPELINE_FUNCTION", os.environ.get("FC_PIPELINE_FUNCTION", "")),
         payload=json.dumps({"run_id": job["run_id"]}).encode(),
         headers={
             "x-fc-invocation-type": "Async",

@@ -8,18 +8,21 @@
       content="Sizzle turns a repository and live app into a finished three-minute demo video—then critiques and recuts its own work."
     />
     <title>Sizzle — Your demo video, while you sleep</title>
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
     <header>
       <a class="brand" href="/" aria-label="Sizzle home">
-        <span class="brand-mark">S</span>
+        <img class="brand-mark" src="/logo.png" alt="" width="32" height="32" />
         <span>Sizzle</span>
       </a>
       <nav aria-label="Main navigation">
         <a href="#how">How it works</a>
-        <a href="https://github.com/ammbo/sizzle">Source</a>
         <span class="status"><i></i> Qwen Cloud</span>
       </nav>
     </header>
@@ -45,6 +48,12 @@
               required
               autocomplete="url"
             />
+            <details class="field-help">
+              <summary>Private repo?</summary>
+              <p>Install the <a href="https://github.com/apps/sizzle-video-ai/installations/new"
+                target="_blank" rel="noopener">Sizzle GitHub App</a> on your repository first.
+                Only read-only access to file contents is requested.</p>
+            </details>
           </div>
           <div class="field">
             <label for="app-url">Live app URL <span>optional</span></label>

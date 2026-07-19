@@ -1,10 +1,36 @@
+# OS
 .DS_Store
+Thumbs.db
+
+# Python
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+*.egg
+
+# Node
 node_modules/
+dist/
+
+# Cloudflare Workers
 .wrangler/
 .dev.vars*
+
+# Secrets / env
+.env
+.env.*
+
+# Sizzle runtime output
 runs/
-dist/
+
+# Logs
 *.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+*.pem

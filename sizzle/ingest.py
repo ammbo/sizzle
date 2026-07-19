@@ -30,6 +30,7 @@ class RepoContext:
     manifests: dict[str, str] = field(default_factory=dict)
     commit_log: list[str] = field(default_factory=list)
     local_path: Path | None = None
+    is_private: bool = False
 
     def as_prompt_block(self) -> str:
         parts = [f"# Repository: {self.name}\nURL: {self.repo_url}"]
@@ -48,19 +49,24 @@ def _git(args: list[str], cwd: Path) -> str:
     ).stdout
 
 
-def ingest(repo_url: str, work_dir: Path) -> RepoContext:
+def ingest(repo_url: str, work_dir: Path, *, github_token: str | None = None) -> RepoContext:
     """Clone (or reuse) the repo and extract narrative raw material."""
     name = repo_url.rstrip("/").removesuffix(".git").split("/")[-1]
     dest = work_dir / "repo" / name
 
     if not dest.exists():
         dest.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            ["git", "clone", "--filter=blob:limit=200k", repo_url, str(dest)],
-            capture_output=True, text=True, check=True,
-        )
+        if github_token:
+            from .github_auth import clone_with_token
 
-    ctx = RepoContext(repo_url=repo_url, name=name, local_path=dest)
+            clone_with_token(repo_url, dest, github_token, clone_args=["--filter=blob:limit=200k"])
+        else:
+            subprocess.run(
+                ["git", "clone", "--filter=blob:limit=200k", repo_url, str(dest)],
+                capture_output=True, text=True, check=True,
+            )
+
+    ctx = RepoContext(repo_url=repo_url, name=name, local_path=dest, is_private=bool(github_token))
 
     for rname in README_NAMES:
         p = dest / rname

@@ -6,6 +6,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from base64 import b64decode
+
 INTL_BASE_HTTP = "https://dashscope-intl.aliyuncs.com/api/v1"
 INTL_BASE_WS = "wss://dashscope-intl.aliyuncs.com/api-ws/v1/inference"
 
@@ -21,6 +23,16 @@ class ModelRouting:
     t2v_fallback: str = "wan2.7-t2v"
     tts: str = "cosyvoice-v3-plus"
     tts_voice: str = "longanyang"
+
+
+def _load_github_key() -> str:
+    raw = os.environ.get("GITHUB_APP_PRIVATE_KEY", "")
+    if raw:
+        return raw
+    b64 = os.environ.get("GITHUB_APP_PRIVATE_KEY_B64", "")
+    if b64:
+        return b64decode(b64).decode()
+    return ""
 
 
 @dataclass
@@ -53,6 +65,17 @@ class Config:
 
     # Dry-run: replace every network/model call with a deterministic local stub.
     dry_run: bool = False
+
+    # GitHub App (private repo access)
+    github_app_id: int = field(default_factory=lambda: int(os.environ.get("GITHUB_APP_ID", "") or "0"))
+    github_app_private_key: str = field(default_factory=lambda: _load_github_key())
+
+    # Browser auth (authenticated app capture)
+    state_encryption_key: str = field(
+        default_factory=lambda: os.environ.get("SIZZLE_STATE_ENCRYPTION_KEY", "")
+    )
+    browser_auth_ttl_s: int = 3600
+    browser_auth_session_ttl_s: int = 300
 
     def apply_endpoints(self) -> None:
         import dashscope

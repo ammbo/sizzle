@@ -1,0 +1,63 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "fc:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:ListBuckets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:PutBucket",
+        "oss:GetBucketInfo",
+        "oss:GetBucketLocation",
+        "oss:GetBucketAcl",
+        "oss:PutBucketAcl",
+        "oss:GetBucketStat",
+        "oss:ListObjects"
+      ],
+      "Resource": "acs:oss:*:*:sizzle-video-ai-*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:GetObject",
+        "oss:PutObject",
+        "oss:DeleteObject"
+      ],
+      "Resource": "acs:oss:*:*:sizzle-video-ai-*/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cr:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "log:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ram:GetRole",
+        "ram:PassRole"
+      ],
+      "Resource": "acs:ram:*:*:role/SizzleFunctionRole"
+    }
+  ]
+}

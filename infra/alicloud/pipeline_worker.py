@@ -62,7 +62,12 @@ def handler(event: bytes, context) -> str:
                 work_dir=Path(tmp),
                 api_key=os.environ["DASHSCOPE_API_KEY"],
             )
-            manifest = make_demo_video(cfg, job["repo_url"], job.get("app_url"))
+            manifest = make_demo_video(
+                cfg,
+                job["repo_url"],
+                job.get("app_url"),
+                browser_state_key=job.get("browser_state_key"),
+            )
             run_dir = Path(manifest.final_cut).parent
 
             prefix = f"runs/{run_id}/artifacts"
