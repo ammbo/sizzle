@@ -7,39 +7,6 @@ function showMessage(text, isError = false) {
   message.classList.add("visible");
 }
 
-async function watchRun(runId) {
-  const deadline = Date.now() + 20 * 60 * 1000;
-  for (;;) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    if (Date.now() > deadline) {
-      showMessage("This run timed out. Please try again.", true);
-      return;
-    }
-    const response = await fetch(`/api/runs/${encodeURIComponent(runId)}`);
-    if (!response.ok) return;
-    const run = await response.json();
-    if (run.status === "completed") {
-      message.replaceChildren(
-        document.createTextNode("Final cut ready. "),
-        Object.assign(document.createElement("a"), {
-          href: run.final_cut_url,
-          textContent: "Watch and download →",
-          target: "_blank",
-          rel: "noopener",
-        }),
-      );
-      return;
-    }
-    if (run.status === "failed") {
-      showMessage("This run failed. Please try again.", true);
-      return;
-    }
-    showMessage(`Run ${runId}: ${run.status}…`);
-  }
-}
-
-// ── Form submission ───────────────────────────────────────────
-
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = form.querySelector("button");
@@ -62,15 +29,12 @@ form.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(result.message || "Unable to start this run.");
     }
-    showMessage(`Run ${result.run_id} started. The first cut is now in production.`);
-    form.reset();
-    void watchRun(result.run_id);
+    window.location.href = `/runs/${encodeURIComponent(result.run_id)}`;
   } catch (error) {
     showMessage(
       error instanceof Error ? error.message : "Unable to start this run.",
       true,
     );
-  } finally {
     button.disabled = false;
   }
 });

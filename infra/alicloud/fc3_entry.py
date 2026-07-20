@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import re
+import sys
+import traceback
 import uuid
 from datetime import datetime, timezone
 from urllib.parse import urlparse
@@ -24,6 +27,13 @@ import urllib.error
 
 import oss2
 from oss2.credentials import EnvironmentVariableCredentialsProvider
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("sizzle.api")
 
 RUN_ID = re.compile(r"^run_[a-f0-9]{24}$")
 
@@ -93,6 +103,7 @@ def _invoke_fc3(function_name: str, payload: bytes, extra_headers: dict | None =
 
     path = f"/2023-03-30/functions/{function_name}/invocations"
     url = f"{endpoint}{path}"
+    log.info("invoke_fc3 function=%s url=%s", function_name, url)
 
     content_type = "application/json"
     accept = "application/json"
@@ -121,7 +132,16 @@ def _invoke_fc3(function_name: str, payload: bytes, extra_headers: dict | None =
         headers.update(extra_headers)
 
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    urllib.request.urlopen(req, timeout=10)
+    try:
+        resp = urllib.request.urlopen(req, timeout=10)
+        log.info("invoke_fc3_ok function=%s status=%d", function_name, resp.status)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:500]
+        log.error("invoke_fc3_failed function=%s status=%d body=%s", function_name, e.code, body)
+        raise
+    except Exception as e:
+        log.error("invoke_fc3_error function=%s error=%s", function_name, e, exc_info=True)
+        raise
 
 
 def _invoke_pipeline(job: dict) -> None:
@@ -147,8 +167,10 @@ def handler(event: bytes, context) -> dict:
     method = req.get("httpMethod", req.get("requestContext", {}).get("http", {}).get("method", "GET"))
     path = req.get("rawPath", req.get("path", "/"))
     body_str = req.get("body", "")
+    log.info("request method=%s path=%s", method, path)
 
     if not _authorized(headers):
+        log.warning("unauthorized_request path=%s", path)
         return _response({"error": "unauthorized"}, 401)
 
     # Health check
@@ -167,6 +189,7 @@ def handler(event: bytes, context) -> dict:
             repo_url = _valid_url(payload.get("repo_url"), required=True)
             app_url = _valid_url(payload.get("app_url"), required=False)
         except (ValueError, TypeError, json.JSONDecodeError, KeyError) as exc:
+            log.warning("invalid_request error=%s", exc)
             return _response({"error": "invalid_request", "message": str(exc)}, 400)
 
         run_id = f"run_{uuid.uuid4().hex[:24]}"
@@ -179,7 +202,14 @@ def handler(event: bytes, context) -> dict:
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         _save_job(job)
-        _invoke_pipeline(job)
+        log.info("run_created run_id=%s repo_url=%s", run_id, repo_url)
+        try:
+            _invoke_pipeline(job)
+        except Exception as exc:
+            log.error("pipeline_invoke_failed run_id=%s error=%s", run_id, exc, exc_info=True)
+            job.update({"status": "failed", "error": "invoke_failed", "error_detail": str(exc)[:500]})
+            _save_job(job)
+            return _response({"run_id": run_id, "status": "failed", "error": "Failed to start pipeline"}, 500)
         return _response({"run_id": run_id, "status": "queued"}, 202)
 
     # Get run status
@@ -205,7 +235,10 @@ def handler(event: bytes, context) -> dict:
                 _save_job(job)
 
         result = {k: v for k, v in job.items() if k not in {"repo_url", "app_url", "error_detail"}}
-        if job.get("final_cut_key"):
+        if job.get("cf_video_key"):
+            result["video_url"] = f"/runs/{run_id}/video.mp4"
+            result["run_url"] = f"/runs/{run_id}"
+        elif job.get("final_cut_key"):
             result["final_cut_url"] = _bucket().sign_url("GET", job["final_cut_key"], 900)
         return _response(result)
 

@@ -1,3 +1,5 @@
+const RUN_ID = /^run_[a-f0-9]{24}$/;
+
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "cache-control": "no-store",
@@ -75,9 +77,93 @@ async function proxyToAlibaba(request: Request, env: SizzleEnv): Promise<Respons
   }
 }
 
+function runsPage(runId: string): Response {
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Run ${runId} — Sizzle</title>
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header>
+      <a class="brand" href="/" aria-label="Sizzle home">
+        <img class="brand-mark" src="/logo.png" alt="" width="32" height="32" />
+        <span>Sizzle</span>
+      </a>
+      <nav aria-label="Main navigation">
+        <a href="/">New run</a>
+      </nav>
+    </header>
+    <main class="run-page">
+      <p class="eyebrow">DEMO RUN</p>
+      <h1><em id="run-title">${runId}</em></h1>
+      <p id="run-status" class="run-status" role="status">Checking run status…</p>
+      <div id="run-player-wrap" class="run-player-wrap hidden">
+        <video id="run-player" controls playsinline preload="metadata"
+          src="/runs/${runId}/video.mp4"></video>
+      </div>
+      <div id="run-meta" class="run-meta hidden"></div>
+      <div class="run-actions">
+        <a id="run-download" class="run-download hidden" href="/runs/${runId}/video.mp4" download="final_cut.mp4">Download MP4</a>
+        <a class="run-back" href="/">Start another run</a>
+      </div>
+    </main>
+    <script type="module" src="/run.js"></script>
+  </body>
+</html>`;
+  return new Response(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
+}
+
+async function serveVideo(_request: Request, env: SizzleEnv, runId: string): Promise<Response> {
+  const key = `runs/${runId}/final_cut.mp4`;
+  const object = await env.VIDEOS.get(key);
+  if (!object) {
+    return new Response("Video not found", { status: 404 });
+  }
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("accept-ranges", "bytes");
+  headers.set("cache-control", "public, max-age=31536000, immutable");
+  if (!headers.has("content-type")) {
+    headers.set("content-type", "video/mp4");
+  }
+  if (object.httpEtag) {
+    headers.set("etag", object.httpEtag);
+  }
+
+  return new Response(object.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+    const parts = url.pathname.split("/").filter(Boolean);
+
+    // /runs/{run_id}/video.mp4
+    if (
+      request.method === "GET" &&
+      parts.length === 3 &&
+      parts[0] === "runs" &&
+      parts[2] === "video.mp4" &&
+      RUN_ID.test(parts[1])
+    ) {
+      return serveVideo(request, env, parts[1]);
+    }
+
+    // /runs/{run_id}
+    if (request.method === "GET" && parts.length === 2 && parts[0] === "runs" && RUN_ID.test(parts[1])) {
+      return runsPage(parts[1]);
+    }
 
     if (url.pathname === "/api/health" && request.method === "GET") {
       if (!env.ALIBABA_BACKEND_URL) {

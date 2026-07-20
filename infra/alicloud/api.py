@@ -130,7 +130,10 @@ def _get_run(run_id: str, start_response):
         return _response(start_response, {"error": "not_found"}, "404 Not Found")
 
     result = {key: value for key, value in job.items() if key not in {"repo_url", "app_url", "error_detail"}}
-    if job.get("final_cut_key"):
+    if job.get("cf_video_key"):
+        result["video_url"] = f"/runs/{run_id}/video.mp4"
+        result["run_url"] = f"/runs/{run_id}"
+    elif job.get("final_cut_key"):
         result["final_cut_url"] = _bucket().sign_url("GET", job["final_cut_key"], 900)
     return _response(start_response, result)
 

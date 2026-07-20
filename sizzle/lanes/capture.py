@@ -1,8 +1,9 @@
-"""Capture lane: screenshot the public website and convert to video clips.
+"""Capture lane: screenshot the public website, then animate with HappyHorse i2v.
 
-Loads the app URL in headless Playwright, optionally asks Qwen where to
-scroll or click to find the content described in the shot goal, then
-converts the screenshot to a clip with a slow zoom-in effect.
+Loads the app URL in headless Playwright, asks Qwen where to scroll or click
+to find the content described in the shot goal, takes a screenshot, then feeds
+it to HappyHorse image-to-video for cinematic animation. Falls back to a
+static zoom-in if i2v fails.
 """
 
 from __future__ import annotations
@@ -10,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..config import Config
-from ..ffmpeg import still_to_clip
-from ..qwen import vision_json
+from ..ffmpeg import conform_clip, still_to_clip
+from ..qwen import chat_json, vision_json
 from ..schema import CaptureSpec, Shot
 
 SCOUT_SYSTEM = """You see a screenshot of a public website. The user wants to capture a specific part of the site.
@@ -28,6 +29,68 @@ Use "scroll" to scroll down and reveal content below the fold.
 Use "click" to click a navigation link or tab to reach a different page or section.
 Do not navigate away from the site's domain."""
 
+MOTION_SYSTEM = """You are writing a short cinematic motion prompt for an image-to-video AI model.
+You will be shown a screenshot of a website. Write a prompt describing subtle, professional motion
+to apply to this image — like a product reveal or UI walkthrough.
+
+Return only JSON:
+{{"prompt": "one sentence describing the motion"}}
+
+Good motions: slow zoom into a key feature, gentle parallax revealing depth, a soft spotlight
+sweep highlighting the headline, the cursor gliding to a CTA button.
+Bad motions: wild camera moves, adding people or objects not in the image, changing the content."""
+
+
+def _animate_screenshot(
+    cfg: Config, screenshot: Path, duration_s: float, out_dir: Path, clip: Path,
+) -> tuple[Path, str, int]:
+    """Try HappyHorse i2v on the screenshot; fall back to still_to_clip."""
+    from http import HTTPStatus
+
+    # Ask Qwen to write a motion prompt for this specific screenshot
+    motion, tokens = vision_json(
+        cfg, cfg.models.capture, MOTION_SYSTEM,
+        "Write a cinematic motion prompt for this website screenshot.",
+        [str(screenshot)],
+    )
+    prompt = motion.get("prompt", "slow cinematic zoom into the main content area")
+
+    # Call HappyHorse i2v
+    try:
+        from dashscope import VideoSynthesis
+
+        cfg.apply_endpoints()
+        task = VideoSynthesis.async_call(
+            model=cfg.models.i2v,
+            prompt=prompt,
+            img_url=f"file://{screenshot}",
+            parameters={
+                "resolution": "720P",
+                "ratio": "16:9",
+                "duration": max(3, min(int(duration_s), 15)),
+                "prompt_extend": True,
+            },
+        )
+        rsp = VideoSynthesis.wait(task)
+        if rsp.status_code != HTTPStatus.OK:
+            raise RuntimeError(f"i2v: {rsp.code} {rsp.message}")
+
+        # Download and conform
+        import httpx
+
+        raw = out_dir / "i2v_raw.mp4"
+        with httpx.stream("GET", rsp.output.video_url, timeout=120, follow_redirects=True) as r:
+            r.raise_for_status()
+            with open(raw, "wb") as f:
+                for chunk in r.iter_bytes():
+                    f.write(chunk)
+        conform_clip(raw, clip, duration_s, cfg.resolution, cfg.fps)
+        return clip, cfg.models.i2v, tokens
+    except Exception:
+        # Fall back to static zoom
+        still_to_clip(screenshot, clip, duration_s, cfg.resolution, cfg.fps)
+        return clip, "still_fallback", tokens
+
 
 def capture_shot(
     cfg: Config,
@@ -35,7 +98,7 @@ def capture_shot(
     app_url: str,
     out_dir: Path,
 ) -> tuple[Path | None, int, int, str]:
-    """Screenshot the public site, guided by the shot goal.
+    """Screenshot the public site, animate with i2v, return the clip.
 
     Returns (clip or None, attempts, tokens, outcome).
     """
@@ -89,12 +152,11 @@ def capture_shot(
                             page.click(selector, timeout=5000)
                             page.wait_for_load_state("networkidle", timeout=8000)
                         except Exception:
-                            pass  # couldn't click; take what we have
+                            pass
                 else:
                     screenshot = step_img
                     break
             else:
-                # Took all scout steps without a "screenshot" action — use last screenshot
                 final_img = out_dir / "scout_final.png"
                 page.screenshot(path=str(final_img))
                 screenshot = final_img
@@ -102,8 +164,12 @@ def capture_shot(
             context.close()
             browser.close()
 
+        # Animate the screenshot with HappyHorse i2v
         clip = out_dir / f"{shot.id}.mp4"
-        still_to_clip(screenshot, clip, shot.duration_s, cfg.resolution, cfg.fps)
+        clip, model_used, anim_tokens = _animate_screenshot(
+            cfg, screenshot, shot.duration_s, out_dir, clip,
+        )
+        tokens_total += anim_tokens
         return clip, 1, tokens_total, "pass"
 
     except Exception as e:

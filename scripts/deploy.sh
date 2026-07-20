@@ -67,7 +67,11 @@ print(json.dumps({
     'SIZZLE_FC_PIPELINE_FUNCTION': '$FC_FUNCTION_PIPELINE',
     'EDGE_API_TOKEN': os.environ['EDGE_API_TOKEN'],
     'GITHUB_APP_ID': os.environ.get('GITHUB_APP_ID', ''),
-    'GITHUB_APP_PRIVATE_KEY': os.environ.get('GITHUB_APP_PRIVATE_KEY', ''),
+    'GITHUB_APP_PRIVATE_KEY_B64': __import__('base64').b64encode(os.environ.get('GITHUB_APP_PRIVATE_KEY', '').encode()).decode(),
+    'R2_ACCOUNT_ID': os.environ.get('R2_ACCOUNT_ID', os.environ.get('CLOUDFLARE_ACCOUNT_ID', '')),
+    'R2_ACCESS_KEY_ID': os.environ.get('R2_ACCESS_KEY_ID', ''),
+    'R2_SECRET_ACCESS_KEY': os.environ.get('R2_SECRET_ACCESS_KEY', ''),
+    'R2_BUCKET_NAME': os.environ.get('R2_BUCKET_NAME', 'sizzle-storage'),
 }, separators=(',',':')))
 ")
 
@@ -247,6 +251,18 @@ fi # end of Alibaba Cloud section
 # ── 5. Cloudflare Worker ──────────────────────────────────────
 if [[ "$ALICLOUD_ONLY" -eq 0 ]]; then
   log "Deploying Cloudflare Worker"
+
+  R2_BUCKET_NAME="${R2_BUCKET_NAME:-sizzle-storage}"
+  if wrangler r2 bucket create "$R2_BUCKET_NAME" >/dev/null 2>&1; then
+    ok "Created R2 bucket $R2_BUCKET_NAME"
+  else
+    ok "R2 bucket $R2_BUCKET_NAME ready"
+  fi
+
+  if [[ -z "${R2_ACCESS_KEY_ID:-}" || -z "${R2_SECRET_ACCESS_KEY:-}" ]]; then
+    warn "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY not set — videos will stay on OSS only"
+    warn "Create an R2 API token in Cloudflare dashboard and add credentials to .dev.vars"
+  fi
 
   if [[ -n "${API_URL:-}" ]]; then
     echo "$API_URL" | wrangler secret put ALIBABA_BACKEND_URL >/dev/null 2>&1 \

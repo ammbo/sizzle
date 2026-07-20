@@ -31,6 +31,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("content-length", 0))
         body = self.rfile.read(length) if length else b""
+        sys.stderr.write(f"[fc] POST {self.path} body_len={length}\n")
         try:
             result = self._fc_handler(body, None)
             if isinstance(result, dict):
@@ -40,8 +41,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 out = result or b""
             self.send_response(200)
+            sys.stderr.write(f"[fc] POST {self.path} -> 200 response_len={len(out)}\n")
         except Exception:
-            out = json.dumps({"error": traceback.format_exc()[-1000:]}).encode()
+            tb = traceback.format_exc()
+            sys.stderr.write(f"[fc] POST {self.path} -> 500 error:\n{tb}\n")
+            out = json.dumps({"error": tb[-1000:]}).encode()
             self.send_response(500)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
