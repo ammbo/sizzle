@@ -98,7 +98,11 @@ def _invoke_fc3(function_name: str, payload: bytes, extra_headers: dict | None =
     """Invoke an FC 3.0 function via the Alibaba Cloud OpenAPI (ROA V1 signing)."""
     ak_id = os.environ["ALIBABA_CLOUD_ACCESS_KEY_ID"]
     ak_secret = os.environ["ALIBABA_CLOUD_ACCESS_KEY_SECRET"]
+    # Deploy injects long-term LTAI keys. Attaching an FC role also injects
+    # ALIBABA_CLOUD_SECURITY_TOKEN; mixing that token with LTAI keys yields 403.
     sts_token = os.environ.get("ALIBABA_CLOUD_SECURITY_TOKEN")
+    if ak_id.startswith("LTAI"):
+        sts_token = None
     endpoint = os.environ.get("SIZZLE_FC_ENDPOINT", "")
 
     path = f"/2023-03-30/functions/{function_name}/invocations"
@@ -138,7 +142,7 @@ def _invoke_fc3(function_name: str, payload: bytes, extra_headers: dict | None =
     except urllib.error.HTTPError as e:
         body = e.read().decode(errors="replace")[:500]
         log.error("invoke_fc3_failed function=%s status=%d body=%s", function_name, e.code, body)
-        raise
+        raise RuntimeError(f"HTTP {e.code}: {body}") from e
     except Exception as e:
         log.error("invoke_fc3_error function=%s error=%s", function_name, e, exc_info=True)
         raise

@@ -123,6 +123,8 @@ aliyun oss cp "$API_ZIP" \
 rm -f "$API_ZIP"
 ok "Uploaded"
 
+FC_LOG_CONFIG='{"project":"'"${SLS_PROJECT}"'","logstore":"'"${SLS_LOGSTORE}"'","enableRequestMetrics":true,"enableInstanceMetrics":true,"logBeginRule":"DefaultRegex"}'
+
 log "Deploying FC function: $FC_FUNCTION_API"
 if aliyun fc get-function --region "$ALICLOUD_REGION" --function-name "$FC_FUNCTION_API" >/dev/null 2>&1; then
   aliyun fc update-function \
@@ -135,6 +137,8 @@ if aliyun fc get-function --region "$ALICLOUD_REGION" --function-name "$FC_FUNCT
     --disk-size 512 \
     --timeout "$FC_API_TIMEOUT" \
     --environment-variables "$FC_ENV_VARS" \
+    --role "$FC_ROLE_ARN" \
+    --log-config "$FC_LOG_CONFIG" \
     --code '{"ossBucketName":"'"${OSS_BUCKET}"'","ossObjectName":"deploy/sizzle-api.zip"}' \
     >/dev/null 2>&1
   ok "Updated $FC_FUNCTION_API"
@@ -149,6 +153,8 @@ else
     --disk-size 512 \
     --timeout "$FC_API_TIMEOUT" \
     --environment-variables "$FC_ENV_VARS" \
+    --role "$FC_ROLE_ARN" \
+    --log-config "$FC_LOG_CONFIG" \
     --code '{"ossBucketName":"'"${OSS_BUCKET}"'","ossObjectName":"deploy/sizzle-api.zip"}' \
     --description "Sizzle video AI — HTTP API" \
     >/dev/null 2>&1
@@ -206,6 +212,8 @@ else
           --disk-size "$FUNC_DISK" \
           --timeout "$FUNC_TO" \
           --environment-variables "$FC_ENV_VARS" \
+          --role "$FC_ROLE_ARN" \
+          --log-config "$FC_LOG_CONFIG" \
           --custom-container-config "$CONTAINER_CONFIG" \
           >/dev/null 2>&1
         ok "Updated $FUNC_NAME"
@@ -220,6 +228,8 @@ else
           --disk-size "$FUNC_DISK" \
           --timeout "$FUNC_TO" \
           --environment-variables "$FC_ENV_VARS" \
+          --role "$FC_ROLE_ARN" \
+          --log-config "$FC_LOG_CONFIG" \
           --custom-container-config "$CONTAINER_CONFIG" \
           --description "Sizzle video AI — $FUNC_NAME" \
           >/dev/null 2>&1
