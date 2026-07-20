@@ -46,16 +46,15 @@ def still_to_clip(image: Path, out: Path, duration_s: float, size: tuple[int, in
 
 
 def conform_clip(src: Path, out: Path, duration_s: float, size: tuple[int, int], fps: int) -> Path:
-    """Normalize any clip to the house format and trim/pad to the target duration."""
+    """Normalize any clip to the house format.  Trim to *duration_s* if the
+    source is longer, but never pad / stretch a shorter clip — dead air is
+    worse than a slightly shorter slot.  The actual duration is the minimum
+    of the source length and *duration_s*."""
     w, h = size
     actual = probe_duration(src)
     vf = f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,fps={fps},format=yuv420p"
-    if actual >= duration_s:
-        run(["-i", str(src), "-t", f"{duration_s:.3f}", "-vf", vf, "-an", str(out)])
-    else:
-        # hold the last frame to fill the slot
-        run(["-i", str(src), "-vf", f"{vf},tpad=stop_mode=clone:stop_duration={duration_s - actual:.3f}",
-             "-t", f"{duration_s:.3f}", "-an", str(out)])
+    trim = min(actual, duration_s)
+    run(["-i", str(src), "-t", f"{trim:.3f}", "-vf", vf, "-an", str(out)])
     return out
 
 

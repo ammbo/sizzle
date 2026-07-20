@@ -1,9 +1,10 @@
-"""Orchestrator: repo URL + app URL in, three-minute cut + shot manifest + cost report out.
+"""Orchestrator: repo URL + app URL in, demo video + shot manifest + cost report out.
 
 produce -> assemble -> critique -> revise, keeping the best cut ever produced (monotonic)."""
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from pathlib import Path
@@ -109,9 +110,16 @@ class Run:
         return None
 
     def _demote(self, shot: Shot) -> None:
-        prompt = getattr(shot.spec, "prompt", None) or getattr(shot.spec, "goal", "")
+        prompt = getattr(shot.spec, "prompt", None) or getattr(shot.spec, "goal", "") or ""
+        text = str(prompt)
+        # Never paint lane failure / exception text onto the cut.
+        if re.search(r"(?i)error|exception|traceback|failed|RESHOOT|directive", text):
+            text = ""
         shot.type = ShotType.RENDER
-        shot.spec = RenderSpec(template="title_card", payload={"title": "", "subtitle": str(prompt)[:120]})
+        shot.spec = RenderSpec(
+            template="title_card",
+            payload={"title": text[:80] or " ", "subtitle": ""},
+        )
         self.demoted.append(shot.id)
 
     # ------------------------------------------------------------- directives

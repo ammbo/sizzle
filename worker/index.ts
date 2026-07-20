@@ -130,24 +130,62 @@ function runsPage(runId: string): Response {
   });
 }
 
-async function serveVideo(_request: Request, env: SizzleEnv, runId: string): Promise<Response> {
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, HEAD, OPTIONS",
+  "access-control-allow-headers": "Range",
+  "access-control-expose-headers": "Content-Length, Content-Range, Accept-Ranges",
+} as const;
+
+async function serveVideo(request: Request, env: SizzleEnv, runId: string): Promise<Response> {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
   const key = `runs/${runId}/final_cut.mp4`;
-  const object = await env.VIDEOS.get(key);
+  const rangeHeader = request.headers.get("range");
+
+  // Use R2's built-in range support when a Range header is present.
+  const object = rangeHeader
+    ? await env.VIDEOS.get(key, { range: request.headers })
+    : await env.VIDEOS.get(key);
+
   if (!object) {
-    return new Response("Video not found", { status: 404 });
+    return new Response("Video not found", {
+      status: 404,
+      headers: CORS_HEADERS,
+    });
   }
 
   const headers = new Headers();
   object.writeHttpMetadata(headers);
+
+  // Always force the correct content type regardless of stored metadata.
+  headers.set("content-type", "video/mp4");
   headers.set("accept-ranges", "bytes");
   headers.set("cache-control", "public, max-age=31536000, immutable");
-  if (!headers.has("content-type")) {
-    headers.set("content-type", "video/mp4");
+
+  // CORS
+  for (const [k, v] of Object.entries(CORS_HEADERS)) {
+    headers.set(k, v);
   }
+
   if (object.httpEtag) {
     headers.set("etag", object.httpEtag);
   }
 
+  // Range request: R2 returns a body sliced to the requested range, but we
+  // still need to set the Content-Range header and respond with 206.
+  if (rangeHeader && "range" in object) {
+    const r2Range = object.range as { offset: number; length: number };
+    const start = r2Range.offset;
+    const end = start + r2Range.length - 1;
+    headers.set("content-range", `bytes ${start}-${end}/${object.size}`);
+    headers.set("content-length", String(r2Range.length));
+    return new Response(object.body, { status: 206, headers });
+  }
+
+  headers.set("content-length", String(object.size));
   return new Response(object.body, { status: 200, headers });
 }
 
@@ -158,7 +196,7 @@ export default {
 
     // /runs/{run_id}/video.mp4
     if (
-      request.method === "GET" &&
+      ["GET", "HEAD", "OPTIONS"].includes(request.method) &&
       parts.length === 3 &&
       parts[0] === "runs" &&
       parts[2] === "video.mp4" &&

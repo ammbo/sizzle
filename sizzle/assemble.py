@@ -56,7 +56,9 @@ def _caption_overlay(cfg: Config, text: str, out: Path) -> Path:
 
 
 def _shot_audio(cfg: Config, shot: Shot, vo_path: Path | None, out: Path) -> Path:
-    """A fixed-length audio segment per shot: VO padded/trimmed to the slot, or silence."""
+    """Audio segment for a shot: VO trimmed/sped-up to fit the slot, or silence.
+    Never pads with silence beyond the VO length — the video uses ``-shortest``
+    so the natural content length wins."""
     d = shot.duration_s
     if vo_path is None:
         run(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", f"{d:.3f}",
@@ -66,9 +68,9 @@ def _shot_audio(cfg: Config, shot: Shot, vo_path: Path | None, out: Path) -> Pat
     if vo_len > d:
         # speed up slightly rather than clipping the line mid-word (cap at 1.25x)
         tempo = min(vo_len / d, 1.25)
-        af = f"atempo={tempo:.3f},apad,aresample=44100"
+        af = f"atempo={tempo:.3f},aresample=44100"
     else:
-        af = "apad,aresample=44100"
+        af = "aresample=44100"
     run(["-i", str(vo_path), "-af", af, "-t", f"{d:.3f}", "-ac", "2", "-c:a", "aac", str(out)])
     return out
 

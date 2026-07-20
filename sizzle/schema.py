@@ -89,7 +89,7 @@ class ProjectInfo(BaseModel):
 
 
 class BeatSheet(BaseModel):
-    target_duration_s: int = 180
+    max_duration_s: int = 180
     project: ProjectInfo
     beats: list[Beat]
     shots: list[Shot]

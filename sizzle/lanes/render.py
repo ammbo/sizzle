@@ -3,6 +3,7 @@ and metric plates. PIL draws a still; ffmpeg turns it into a clip with a slow pu
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -160,7 +161,21 @@ def render_shot(cfg: Config, shot: Shot, out_dir: Path) -> Path:
     """Render a RENDER-lane shot to a conformed clip. Deterministic; zero tokens."""
     assert isinstance(shot.spec, RenderSpec)
     out_dir.mkdir(parents=True, exist_ok=True)
-    img = _TEMPLATES[shot.spec.template](cfg.resolution, shot.spec.payload)
+    spec = shot.spec
+    # Last-line defense: never paint critic/pipeline JSON into a code_snippet frame.
+    if spec.template == "code_snippet":
+        payload = spec.payload or {}
+        blob = " ".join(str(payload.get(k, "")) for k in ("code", "caption", "language", "title"))
+        if re.search(
+            r"(?is)RESHOOT|RETIME|directive|acceptance\s+predicate|critic\s+vlm|"
+            r"\"op\"\s*:|pipeline_failed|error_detail|traceback",
+            blob,
+        ):
+            spec = RenderSpec(
+                template="title_card",
+                payload={"title": str(payload.get("caption") or " ")[:60], "subtitle": ""},
+            )
+    img = _TEMPLATES[spec.template](cfg.resolution, spec.payload)
     still = out_dir / f"{shot.id}.png"
     img.save(still)
     clip = out_dir / f"{shot.id}.mp4"

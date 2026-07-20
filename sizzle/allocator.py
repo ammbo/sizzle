@@ -7,6 +7,7 @@ GENERATE candidates, demoting losers to a stylized RENDER fallback.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .config import Config
@@ -28,10 +29,12 @@ def _generate_cost(cfg: Config, shot: Shot) -> int:
 def _demote_to_render(shot: Shot) -> None:
     """Stylized motion-graphics fallback for a GENERATE shot that lost the knapsack."""
     prompt = shot.spec.prompt if isinstance(shot.spec, GenerateSpec) else ""
+    if re.search(r"(?i)RESHOOT|directive|acceptance\s+predicate|critic\s+vlm|error|traceback", str(prompt)):
+        prompt = ""
     shot.type = ShotType.RENDER
     shot.spec = RenderSpec(
         template="title_card",
-        payload={"title": "", "subtitle": prompt[:120], "style": "kinetic"},
+        payload={"title": (prompt[:80] or " "), "subtitle": "", "style": "kinetic"},
     )
     shot.cost_estimate = CostEstimate(value=0)
 

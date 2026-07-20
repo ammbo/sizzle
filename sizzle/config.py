@@ -41,8 +41,8 @@ class Config:
     work_dir: Path = field(default_factory=lambda: Path("runs"))
     models: ModelRouting = field(default_factory=ModelRouting)
 
-    target_duration_s: int = 180
-    duration_tolerance_s: int = 5
+    max_duration_s: int = 180
+    min_duration_s: int = 60
     money_shot_deadline_s: int = 45
     max_dead_air_s: float = 2.0
 

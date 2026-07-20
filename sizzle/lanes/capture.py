@@ -8,6 +8,7 @@ static zoom-in if i2v fails.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from ..config import Config
@@ -25,7 +26,10 @@ Given the goal, decide ONE action. Return only JSON:
  "reason": "one short sentence"}}
 
 Use "screenshot" when the current view already shows what the goal describes.
-Use "scroll" to scroll down and reveal content below the fold.
+For goals about the hero, landing page, headline, value prop, or top of the site: prefer
+"screenshot" immediately — do not scroll past the fold.
+Use "scroll" only when the goal explicitly names below-the-fold content (features, pricing,
+docs, footer).
 Use "click" to click a navigation link or tab to reach a different page or section.
 Do not navigate away from the site's domain."""
 
@@ -36,9 +40,15 @@ to apply to this image — like a product reveal or UI walkthrough.
 Return only JSON:
 {{"prompt": "one sentence describing the motion"}}
 
-Good motions: slow zoom into a key feature, gentle parallax revealing depth, a soft spotlight
-sweep highlighting the headline, the cursor gliding to a CTA button.
-Bad motions: wild camera moves, adding people or objects not in the image, changing the content."""
+Good motions: slow zoom into the hero headline, gentle parallax on the top of the page, a soft
+spotlight sweep highlighting the primary CTA, the cursor gliding to a button already in frame.
+Bad motions: scrolling the page, panning to mid-page content not in the screenshot, wild camera
+moves, adding people or objects not in the image, changing the content."""
+
+_HERO_GOAL = re.compile(
+    r"(?i)\b(hero|landing|home\s*page|top\s+of|headline|value\s*prop|above\s+the\s+fold|"
+    r"main\s+(?:cta|call)|brand(?:ing)?|splash)\b"
+)
 
 
 def _animate_screenshot(
@@ -53,7 +63,7 @@ def _animate_screenshot(
         "Write a cinematic motion prompt for this website screenshot.",
         [str(screenshot)],
     )
-    prompt = motion.get("prompt", "slow cinematic zoom into the main content area")
+    prompt = motion.get("prompt", "slow cinematic zoom into the hero headline and primary CTA")
 
     # Call HappyHorse i2v
     try:
@@ -122,9 +132,12 @@ def capture_shot(
             )
             page = context.new_page()
             page.goto(spec.start_url, wait_until="networkidle", timeout=30000)
+            page.evaluate("window.scrollTo(0, 0)")
+            page.wait_for_timeout(400)
 
             screenshot = out_dir / "capture_final.png"
             max_scout_steps = min(spec.max_steps, 3)
+            hero_goal = bool(_HERO_GOAL.search(spec.goal or "")) or not (spec.goal or "").strip()
 
             for step in range(max_scout_steps):
                 step_img = out_dir / f"scout_{step:02d}.png"
@@ -137,6 +150,9 @@ def capture_shot(
                 )
                 tokens_total += tokens
                 action = decision.get("action", "screenshot")
+                if hero_goal and action in ("scroll", "click"):
+                    # Establishing / hero shots must stay at the top of the page.
+                    action = "screenshot"
 
                 if action == "screenshot":
                     screenshot = step_img
@@ -158,8 +174,19 @@ def capture_shot(
                     break
             else:
                 final_img = out_dir / "scout_final.png"
+                if hero_goal:
+                    page.evaluate("window.scrollTo(0, 0)")
+                    page.wait_for_timeout(300)
                 page.screenshot(path=str(final_img))
                 screenshot = final_img
+
+            # Final safety: hero/establishing shots always capture from the top.
+            if hero_goal:
+                page.evaluate("window.scrollTo(0, 0)")
+                page.wait_for_timeout(300)
+                top_img = out_dir / "capture_top.png"
+                page.screenshot(path=str(top_img))
+                screenshot = top_img
 
             context.close()
             browser.close()

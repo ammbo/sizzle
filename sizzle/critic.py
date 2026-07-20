@@ -31,9 +31,10 @@ Scorecard (score each 0.0-1.0):
 - presentation: {presentation}
 
 Hard constraints (violations demand directives):
-- total duration <= {duration}s
+- total duration between {min_duration}s and {max_duration}s
 - the money shot (product visibly working) lands before 0:{money_deadline}
 - no dead air longer than {dead_air}s
+- prefer a tight, natural-length video over padding to fill time
 
 Return ONLY JSON:
 {{
@@ -63,7 +64,8 @@ def review(cfg: Config, cut: Path, sheet: BeatSheet, work_dir: Path,
     beats = "\n".join(f"{b.id} {b.name} ({b.duration_s}s): {b.intent}" for b in sheet.beats)
 
     system = SYSTEM.format(
-        duration=cfg.target_duration_s,
+        min_duration=cfg.min_duration_s,
+        max_duration=cfg.max_duration_s,
         money_deadline=cfg.money_shot_deadline_s,
         dead_air=cfg.max_dead_air_s,
         **RUBRIC,
@@ -88,14 +90,15 @@ def _apply_guards(cfg: Config, verdict: CriticVerdict, sheet: BeatSheet,
         if isinstance(d, Reshoot) and reshoot_counts.get(d.shot_id, 0) >= 1:
             continue  # a shot may be RESHOOT once; second failure demotes its type upstream
         kept.append(d)
-    if projected > cfg.target_duration_s:
+    if projected > cfg.max_duration_s:
         kept = [d for d in kept if not (isinstance(d, Retime) and d.delta_s > 0)]
     verdict.directives = kept
     return verdict
 
 
 def hard_constraints_ok(cfg: Config, cut: Path) -> bool:
-    return probe_duration(cut) <= cfg.target_duration_s + cfg.duration_tolerance_s
+    dur = probe_duration(cut)
+    return cfg.min_duration_s <= dur <= cfg.max_duration_s
 
 
 def _stub_verdict(sheet: BeatSheet, iteration: int) -> CriticVerdict:
