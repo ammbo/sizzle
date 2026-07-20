@@ -100,12 +100,19 @@ function runsPage(runId: string): Response {
     </header>
     <main class="run-page">
       <p class="eyebrow">DEMO RUN</p>
-      <h1><em id="run-title">${runId}</em></h1>
-      <p id="run-status" class="run-status" role="status">Checking run status…</p>
-      <div id="run-player-wrap" class="run-player-wrap hidden">
-        <video id="run-player" controls playsinline preload="metadata"
-          src="/runs/${runId}/video.mp4"></video>
+      <h1 id="run-title">${runId}</h1>
+
+      <div id="run-player-wrap" class="run-player-wrap">
+        <div id="run-skeleton" class="run-skeleton">
+          <div class="run-skeleton-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          </div>
+          <p id="run-status" class="run-skeleton-status" role="status">Checking run status…</p>
+          <div class="run-skeleton-bar"><div class="run-skeleton-bar-fill"></div></div>
+        </div>
+        <video id="run-player" class="hidden" controls playsinline preload="metadata"></video>
       </div>
+
       <div id="run-meta" class="run-meta hidden"></div>
       <div class="run-actions">
         <a id="run-download" class="run-download hidden" href="/runs/${runId}/video.mp4" download="final_cut.mp4">Download MP4</a>

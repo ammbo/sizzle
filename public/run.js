@@ -1,9 +1,12 @@
 const runId = location.pathname.split("/").filter(Boolean)[1];
 const statusEl = document.querySelector("#run-status");
+const skeleton = document.querySelector("#run-skeleton");
 const playerWrap = document.querySelector("#run-player-wrap");
 const player = document.querySelector("#run-player");
 const metaEl = document.querySelector("#run-meta");
 const downloadEl = document.querySelector("#run-download");
+const titleEl = document.querySelector("#run-title");
+const barFill = document.querySelector(".run-skeleton-bar-fill");
 
 function show(el) {
   el?.classList.remove("hidden");
@@ -17,6 +20,7 @@ function setStatus(text, isError = false) {
   if (!statusEl) return;
   statusEl.textContent = text;
   statusEl.classList.toggle("error", isError);
+  if (isError && barFill) barFill.style.animation = "none";
 }
 
 function renderMeta(run) {
@@ -31,6 +35,11 @@ function renderMeta(run) {
   metaEl.textContent = bits.join(" · ");
   show(metaEl);
 }
+
+const STATUS_LABELS = {
+  queued: "Queued — waiting for a slot…",
+  running: "Generating your demo video…",
+};
 
 async function poll() {
   if (!runId) {
@@ -53,21 +62,22 @@ async function poll() {
       const run = await resp.json();
 
       if (run.status === "completed") {
-        setStatus("Final cut ready.");
-        renderMeta(run);
-        if (run.video_url || run.final_cut_url) {
-          const src = run.video_url || run.final_cut_url;
-          if (player) player.src = src;
-          show(playerWrap);
+        const src = run.video_url || run.final_cut_url;
+        if (src) {
+          hide(skeleton);
+          if (player) {
+            player.src = src;
+            show(player);
+          }
           show(downloadEl);
-          if (downloadEl && run.video_url) {
-            downloadEl.href = run.video_url;
-          } else if (downloadEl && run.final_cut_url) {
-            downloadEl.href = run.final_cut_url;
+          if (downloadEl) {
+            downloadEl.href = src;
           }
         } else {
           setStatus("Run completed but video is not available yet.", true);
+          return;
         }
+        renderMeta(run);
         return;
       }
 
@@ -76,10 +86,9 @@ async function poll() {
         return;
       }
 
-      setStatus(`Status: ${run.status}…`);
+      setStatus(STATUS_LABELS[run.status] || `Status: ${run.status}…`);
     } catch {
-      setStatus("Connection error while checking run status.", true);
-      return;
+      setStatus("Connection error — retrying…");
     }
 
     if (Date.now() > deadline) {
